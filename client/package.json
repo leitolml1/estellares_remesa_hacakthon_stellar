@@ -1,0 +1,19 @@
+{
+  "name": "stellar-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Modulo cliente standalone (TS puro, sin framework de UI) para conectar Freighter y firmar transacciones. Lo importa/adapta el frontend real cuando arranque.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build:e2e": "esbuild src/e2e-freighter-flow.ts --bundle --format=esm --outfile=dist/e2e-freighter-flow.bundle.js",
+    "serve:e2e": "node serve.mjs"
+  },
+  "dependencies": {
+    "@stellar/freighter-api": "^6.0.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^5.6.0"
+  }
+}

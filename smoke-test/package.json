@@ -1,0 +1,18 @@
+{
+  "name": "stellar-smoke-test",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone script to verify Friendbot + Horizon testnet connectivity before scaffolding the NestJS project (Modulo 1).",
+  "type": "module",
+  "scripts": {
+    "test:stellar": "tsx src/smoke-test.ts"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^12.3.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^22.7.0"
+  }
+}

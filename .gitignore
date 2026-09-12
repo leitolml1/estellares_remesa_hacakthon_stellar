@@ -1,0 +1,7 @@
+# Cache local de la skill de Cursor (tooling del editor, no del proyecto).
+.atl/
+
+# Por si algun subproyecto nuevo no trae su propio .gitignore.
+node_modules/
+dist/
+.env

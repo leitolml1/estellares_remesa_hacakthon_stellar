@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Remesa Directa · Freighter e2e flow (referencia)</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 640px;
+        margin: 2rem auto;
+        color: #1a1a1a;
+      }
+      label {
+        display: block;
+        margin-top: 0.75rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        padding: 0.4rem;
+        box-sizing: border-box;
+      }
+      button {
+        margin-top: 1.25rem;
+        padding: 0.6rem 1.2rem;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+      pre {
+        background: #111;
+        color: #0f0;
+        padding: 1rem;
+        margin-top: 1rem;
+        white-space: pre-wrap;
+        min-height: 3rem;
+        border-radius: 6px;
+      }
+      p.hint {
+        color: #555;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Freighter e2e flow (referencia, no CI)</h1>
+    <p class="hint">
+      Requiere Freighter instalado + una cuenta testnet fondeada por
+      Friendbot, y el backend de NestJS corriendo. Ver comentarios en
+      <code>src/e2e-freighter-flow.ts</code>.
+    </p>
+
+    <label for="backendUrl">Backend URL</label>
+    <input id="backendUrl" value="http://localhost:3050" />
+
+    <label for="destinationPublicKey">Public key destino (otra cuenta testnet)</label>
+    <input id="destinationPublicKey" placeholder="G..." />
+
+    <label for="sendAmount">Monto a enviar (XLM)</label>
+    <input id="sendAmount" value="1" />
+
+    <label for="destMin">Monto minimo a recibir (XLM)</label>
+    <input id="destMin" value="1" />
+
+    <label for="memo">Memo (opcional)</label>
+    <input id="memo" value="e2e-freighter" />
+
+    <button id="run">Correr flujo</button>
+
+    <pre id="log">(esperando...)</pre>
+
+    <script type="module">
+      import { runFreighterFlow, TESTNET_NETWORK_PASSPHRASE } from './dist/e2e-freighter-flow.bundle.js';
+
+      const logEl = document.getElementById('log');
+      const append = (line) => {
+        logEl.textContent += `\n${line}`;
+      };
+
+      document.getElementById('run').addEventListener('click', async () => {
+        logEl.textContent = 'Arrancando...';
+        try {
+          const result = await runFreighterFlow({
+            backendUrl: document.getElementById('backendUrl').value,
+            networkPassphrase: TESTNET_NETWORK_PASSPHRASE,
+            paymentRequest: {
+              destinationPublicKey: document.getElementById('destinationPublicKey').value,
+              sendAsset: { code: 'XLM' },
+              sendAmount: document.getElementById('sendAmount').value,
+              destAsset: { code: 'XLM' },
+              destMin: document.getElementById('destMin').value,
+              memo: document.getElementById('memo').value || undefined,
+            },
+            onStep: append,
+          });
+          append(`\nOK: ${JSON.stringify(result, null, 2)}`);
+        } catch (err) {
+          append(`\nERROR (${err && err.name}): ${err && err.message}`);
+        }
+      });
+    </script>
+  </body>
+</html>
