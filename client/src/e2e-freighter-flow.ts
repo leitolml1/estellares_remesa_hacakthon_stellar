@@ -149,3 +149,234 @@ export async function runFreighterFlow(
     historyRecordCount: historyBody.records.length,
   };
 }
+
+export interface SupplyToBlendOptions {
+  backendUrl: string;
+  networkPassphrase: string;
+  familyPoolId: string;
+  amount: string;
+  onStep?: (step: string) => void;
+}
+
+export interface SupplyToBlendResult {
+  publicKey: string;
+  xdr: string;
+  signedXdr: string;
+  submitResult: { hash: string; ledger: number };
+}
+
+/**
+ * Supply a Blend desde la wallet del family pool. Paso explicito (no
+ * automatico post-deposito, ver comentario en FamilyPoolsService), asi que
+ * el flujo es el mismo patron build -> firma -> submit de siempre.
+ */
+export async function runSupplyToBlendFlow(
+  options: SupplyToBlendOptions,
+): Promise<SupplyToBlendResult> {
+  const log = options.onStep ?? (() => {});
+
+  log('1) Conectando con Freighter...');
+  const { publicKey } = await connectFreighter();
+  log(`   Conectado: ${publicKey}`);
+
+  // Sin popup: el backend arma la operacion de Blend (offline) y la
+  // simula/prepara contra el RPC de Soroban para popular el SorobanData.
+  log('2) POST /family-pools/:id/deposits/build-supply-to-blend...');
+  const buildRes = await fetch(
+    `${options.backendUrl}/family-pools/${options.familyPoolId}/deposits/build-supply-to-blend`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: options.amount }),
+    },
+  );
+  if (!buildRes.ok) {
+    throw new Error(
+      `build-supply-to-blend fallo: ${buildRes.status} ${await buildRes.text()}`,
+    );
+  }
+  const { xdr } = (await buildRes.json()) as { xdr: string };
+  log(`   XDR recibido (${xdr.length} caracteres)`);
+
+  // 👉 POPUP: Freighter muestra la invocacion al contrato de Blend
+  // (invokeHostFunction), no un Payment clasico -- el detalle que muestra
+  // el popup se ve distinto al de un pago normal.
+  log('3) Pidiendole a Freighter que firme el supply...');
+  const { signedXdr } = await signTransactionWithFreighter(
+    xdr,
+    options.networkPassphrase,
+  );
+  log('   Tx firmada.');
+
+  // Reusa el endpoint generico de submit de family-pools: es un wrapper
+  // fino sobre stellarService.submitSignedTx, agnostico al tipo de
+  // operacion que trae el XDR (Payment, setOptions, invokeHostFunction).
+  log('4) POST /family-pools/withdrawals/submit (submit generico)...');
+  const submitRes = await fetch(
+    `${options.backendUrl}/family-pools/withdrawals/submit`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedXdr }),
+    },
+  );
+  if (!submitRes.ok) {
+    throw new Error(
+      `submit fallo: ${submitRes.status} ${await submitRes.text()}`,
+    );
+  }
+  const submitResult = (await submitRes.json()) as {
+    hash: string;
+    ledger: number;
+  };
+  log(`   Confirmada: hash=${submitResult.hash} ledger=${submitResult.ledger}`);
+
+  return { publicKey, xdr, signedXdr, submitResult };
+}
+
+export interface WithdrawWithBlendOptions {
+  backendUrl: string;
+  networkPassphrase: string;
+  familyPoolId: string;
+  destinationPublicKey: string;
+  amount: string;
+  onStep?: (step: string) => void;
+}
+
+export interface WithdrawWithBlendResult {
+  publicKey: string;
+  redeemXdr: string | null;
+  paymentXdr: string;
+  signedRedeemXdr: string | null;
+  signedPaymentXdr: string;
+  redeemSubmitResult: { hash: string; ledger: number } | null;
+  paymentSubmitResult: { hash: string; ledger: number };
+}
+
+/**
+ * Retiro con Blend habilitado: build devuelve DOS xdrs (redeemXdr +
+ * paymentXdr). A PROPOSITO se firman AMBOS antes de someter cualquiera
+ * (en vez de firmar y enviar uno por uno) -- es el caso mas exigente para
+ * probar que el encadenamiento manual de sequence number (hecho en
+ * FamilyPoolsService.buildWithdrawalTx incrementando el mismo objeto
+ * Account entre un build y el otro) aguanta aunque el usuario firme todo
+ * de entrada. La firma en si NO toca el seqNum (ya quedo fijado en el XDR
+ * al momento del build en el backend): lo que importa es que el ORDEN DE
+ * SUBMIT sea redeem primero, payment despues, porque Horizon exige que el
+ * seqNum sometido coincida con la sequence on-chain ACTUAL de la cuenta en
+ * ese momento.
+ */
+export async function runWithdrawWithBlendFlow(
+  options: WithdrawWithBlendOptions,
+): Promise<WithdrawWithBlendResult> {
+  const log = options.onStep ?? (() => {});
+
+  log('1) Conectando con Freighter...');
+  const { publicKey } = await connectFreighter();
+  log(`   Conectado: ${publicKey}`);
+
+  log('2) POST /family-pools/:id/withdrawals/build...');
+  const buildRes = await fetch(
+    `${options.backendUrl}/family-pools/${options.familyPoolId}/withdrawals/build`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        destinationPublicKey: options.destinationPublicKey,
+        amount: options.amount,
+      }),
+    },
+  );
+  if (!buildRes.ok) {
+    throw new Error(
+      `withdrawals/build fallo: ${buildRes.status} ${await buildRes.text()}`,
+    );
+  }
+  const { redeemXdr, paymentXdr } = (await buildRes.json()) as {
+    redeemXdr: string | null;
+    paymentXdr: string;
+  };
+  log(
+    `   redeemXdr=${redeemXdr ? `${redeemXdr.length} chars` : 'null (pool sin Blend habilitado)'}, paymentXdr=${paymentXdr.length} chars`,
+  );
+
+  let signedRedeemXdr: string | null = null;
+  if (redeemXdr) {
+    // 👉 POPUP 1/2: firma del redeem en Blend (invokeHostFunction).
+    log('3) Firmando redeemXdr con Freighter (popup 1/2)...');
+    signedRedeemXdr = (
+      await signTransactionWithFreighter(redeemXdr, options.networkPassphrase)
+    ).signedXdr;
+    log('   redeemXdr firmado.');
+  }
+
+  // 👉 POPUP 2/2: firma del Payment. OJO, esto pasa ANTES de someter
+  // redeemXdr -- es intencional, ver comentario arriba de la funcion.
+  log(
+    '4) Firmando paymentXdr con Freighter (popup 2/2, SIN haber sometido redeemXdr todavia)...',
+  );
+  const { signedXdr: signedPaymentXdr } = await signTransactionWithFreighter(
+    paymentXdr,
+    options.networkPassphrase,
+  );
+  log('   paymentXdr firmado.');
+
+  let redeemSubmitResult: { hash: string; ledger: number } | null = null;
+  if (signedRedeemXdr) {
+    log('5) Sometiendo redeemXdr (POST /family-pools/withdrawals/submit)...');
+    const redeemSubmitRes = await fetch(
+      `${options.backendUrl}/family-pools/withdrawals/submit`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signedXdr: signedRedeemXdr }),
+      },
+    );
+    if (!redeemSubmitRes.ok) {
+      throw new Error(
+        `submit redeemXdr fallo: ${redeemSubmitRes.status} ${await redeemSubmitRes.text()}`,
+      );
+    }
+    redeemSubmitResult = (await redeemSubmitRes.json()) as {
+      hash: string;
+      ledger: number;
+    };
+    log(
+      `   redeem confirmado: hash=${redeemSubmitResult.hash} ledger=${redeemSubmitResult.ledger}`,
+    );
+  }
+
+  log(
+    '6) Sometiendo paymentXdr (recien ahora, despues de que redeemXdr ya se confirmo)...',
+  );
+  const paymentSubmitRes = await fetch(
+    `${options.backendUrl}/family-pools/withdrawals/submit`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedXdr: signedPaymentXdr }),
+    },
+  );
+  if (!paymentSubmitRes.ok) {
+    throw new Error(
+      `submit paymentXdr fallo: ${paymentSubmitRes.status} ${await paymentSubmitRes.text()}`,
+    );
+  }
+  const paymentSubmitResult = (await paymentSubmitRes.json()) as {
+    hash: string;
+    ledger: number;
+  };
+  log(
+    `   payment confirmado: hash=${paymentSubmitResult.hash} ledger=${paymentSubmitResult.ledger}`,
+  );
+
+  return {
+    publicKey,
+    redeemXdr,
+    paymentXdr,
+    signedRedeemXdr,
+    signedPaymentXdr,
+    redeemSubmitResult,
+    paymentSubmitResult,
+  };
+}

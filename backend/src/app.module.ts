@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { StellarModule } from './stellar/stellar.module';
 import { PoolsModule } from './pools/pools.module';
+import { FamilyPoolsModule } from './family-pools/family-pools.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { PoolsModule } from './pools/pools.module';
     }),
     StellarModule,
     PoolsModule,
+    FamilyPoolsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

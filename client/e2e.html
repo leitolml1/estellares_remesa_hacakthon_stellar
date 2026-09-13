@@ -65,12 +65,39 @@
     <label for="memo">Memo (opcional)</label>
     <input id="memo" value="e2e-freighter" />
 
-    <button id="run">Correr flujo</button>
+    <button id="run">Correr flujo (pago directo)</button>
+
+    <hr style="margin-top: 2rem" />
+
+    <h2>Blend (Modulo 3b)</h2>
+    <p class="hint">
+      Requiere un family pool ya creado en Postgres (POST /family-pools) con
+      blendPoolId + investedAssetCode/Issuer configurados, y
+      walletPublicKey = la cuenta de Freighter que conectes aca.
+    </p>
+
+    <label for="familyPoolId">Family pool id (uuid)</label>
+    <input id="familyPoolId" placeholder="uuid del family pool" />
+
+    <label for="blendAmount">Monto (en el asset invertido, ej. USDC)</label>
+    <input id="blendAmount" value="5" />
+
+    <button id="runSupply">Supply to Blend</button>
+
+    <label for="withdrawDestination">Public key destino del retiro</label>
+    <input id="withdrawDestination" placeholder="G..." />
+
+    <button id="runWithdraw">Withdraw with Blend (firma en paralelo)</button>
 
     <pre id="log">(esperando...)</pre>
 
     <script type="module">
-      import { runFreighterFlow, TESTNET_NETWORK_PASSPHRASE } from './dist/e2e-freighter-flow.bundle.js';
+      import {
+        runFreighterFlow,
+        runSupplyToBlendFlow,
+        runWithdrawWithBlendFlow,
+        TESTNET_NETWORK_PASSPHRASE,
+      } from './dist/e2e-freighter-flow.bundle.js';
 
       const logEl = document.getElementById('log');
       const append = (line) => {
@@ -91,6 +118,45 @@
               destMin: document.getElementById('destMin').value,
               memo: document.getElementById('memo').value || undefined,
             },
+            onStep: append,
+          });
+          append(`\nOK: ${JSON.stringify(result, null, 2)}`);
+        } catch (err) {
+          append(`\nERROR (${err && err.name}): ${err && err.message}`);
+        }
+      });
+
+      // .trim() a proposito: copiar/pegar un uuid o una public key desde la
+      // terminal/chat frecuentemente arrastra un espacio o salto de linea
+      // invisible, que rompe IsUUID()/IsStellarPublicKey() en el backend
+      // con un 400 dificil de diagnosticar a simple vista en el input.
+      const trimmedValue = (id) => document.getElementById(id).value.trim();
+
+      document.getElementById('runSupply').addEventListener('click', async () => {
+        logEl.textContent = 'Arrancando supply a Blend...';
+        try {
+          const result = await runSupplyToBlendFlow({
+            backendUrl: trimmedValue('backendUrl'),
+            networkPassphrase: TESTNET_NETWORK_PASSPHRASE,
+            familyPoolId: trimmedValue('familyPoolId'),
+            amount: trimmedValue('blendAmount'),
+            onStep: append,
+          });
+          append(`\nOK: ${JSON.stringify(result, null, 2)}`);
+        } catch (err) {
+          append(`\nERROR (${err && err.name}): ${err && err.message}`);
+        }
+      });
+
+      document.getElementById('runWithdraw').addEventListener('click', async () => {
+        logEl.textContent = 'Arrancando withdraw con Blend (firma en paralelo)...';
+        try {
+          const result = await runWithdrawWithBlendFlow({
+            backendUrl: trimmedValue('backendUrl'),
+            networkPassphrase: TESTNET_NETWORK_PASSPHRASE,
+            familyPoolId: trimmedValue('familyPoolId'),
+            destinationPublicKey: trimmedValue('withdrawDestination'),
+            amount: trimmedValue('blendAmount'),
             onStep: append,
           });
           append(`\nOK: ${JSON.stringify(result, null, 2)}`);

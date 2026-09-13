@@ -349,9 +349,11 @@ export class StellarService {
   /**
    * Centraliza el mapeo de errores de Horizon/SDK a excepciones legibles de
    * Nest, para no repetir el switch en cada metodo publico del servicio.
-   * Nunca propaga el error crudo del SDK al cliente.
+   * Nunca propaga el error crudo del SDK al cliente. Publico (no privado)
+   * a proposito: otros modulos que arman sus propias tx contra el mismo
+   * Horizon.Server (ej. family-pools) lo reusan en vez de duplicar el switch.
    */
-  private mapHorizonError(error: unknown): never {
+  mapHorizonError(error: unknown): never {
     // Las excepciones propias de Nest (ej. el UnprocessableEntityException
     // del chequeo de trustline o el de toAsset) ya son la respuesta final
     // que quiero devolver: si se re-mapean igual que un error del SDK caen
@@ -370,6 +372,18 @@ export class StellarService {
       ) {
         throw new ConflictException(
           'La cuenta tiene una transaccion pendiente o el sequence number esta desactualizado, reintenta.',
+        );
+      }
+
+      if (
+        transaction ===
+        Horizon.HorizonApi.TransactionFailedResultCodes.TX_BAD_AUTH
+      ) {
+        // No es un error de firma invalida, es de peso de firma insuficiente
+        // (multisig): se junta el weight de las firmas presentes pero no
+        // llega al threshold configurado en la cuenta.
+        throw new UnprocessableEntityException(
+          'No se juntaron las firmas suficientes para autorizar este retiro.',
         );
       }
 

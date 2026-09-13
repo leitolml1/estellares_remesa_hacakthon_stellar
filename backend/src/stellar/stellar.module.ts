@@ -27,6 +27,9 @@ import {
       },
     },
   ],
-  exports: [StellarService],
+  // STELLAR_SERVER se exporta tambien: family-pools necesita construir sus
+  // propias transacciones (setOptions/payment) con el mismo Horizon.Server,
+  // sin reimplementar la conexion.
+  exports: [StellarService, STELLAR_SERVER],
 })
 export class StellarModule {}
