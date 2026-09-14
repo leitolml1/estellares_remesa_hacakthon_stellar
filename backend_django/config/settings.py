@@ -23,9 +23,39 @@ SECRET_KEY = os.environ.get(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = env_bool("DJANGO_DEBUG", True)
+# Default False a proposito: si alguna vez se te olvida setear la variable
+# en un ambiente real (Render u otro), que falle "cerrado" (DEBUG off) y
+# no al reves. En local, .env explicita DJANGO_DEBUG=true.
+DEBUG = env_bool("DJANGO_DEBUG", False)
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
+
+# Render inyecta el hostname publico del servicio en esta variable en
+# runtime (algo asi como "remesa-directa-backend.onrender.com") - se suma
+# solo si esta presente, sin que haga falta configurar nada a mano por
+# cada deploy/nombre de servicio.
+RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+
+# Necesario para que el login del admin de Django (usa POST + CSRF) no
+# falle detras del dominio de Render: Django exige que el Origin de un
+# POST este en esta lista cuando no es localhost.
+CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host not in ("localhost", "127.0.0.1")]
+
+# Render (como cualquier PaaS detras de un reverse proxy) termina TLS en
+# su borde y reenvia al proceso de gunicorn por HTTP interno: sin decirle
+# a Django que confie en X-Forwarded-Proto, SECURE_SSL_REDIRECT vería
+# todo como HTTP y entraria en loop de redirects infinito.
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+# HSTS no se activa aca a proposito: una vez que el navegador lo respeta,
+# fuerza HTTPS durante todo SECURE_HSTS_SECONDS incluso si mas adelante
+# hiciera falta volver atras - mejor que se prenda a mano cuando el
+# dominio final este decidido, no como default silencioso de un deploy.
 
 
 # Application definition
@@ -46,6 +76,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -110,8 +141,28 @@ USE_TZ = True
 
 
 # Static files
+#
+# Esta API no tiene templates propios ni assets - lo unico que sirve
+# STATIC_URL es el CSS/JS del admin de Django. Whitenoise lo sirve
+# directo desde el proceso de gunicorn en Render (no hace falta nginx ni
+# un servicio de static files aparte).
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+if DEBUG:
+    # ManifestStaticFilesStorage exige haber corrido collectstatic (el
+    # manifest no existe todavia en dev); con DEBUG=True ademas Django ya
+    # sirve estos archivos solo via runserver.
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
+else:
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

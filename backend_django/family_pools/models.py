@@ -40,6 +40,14 @@ class FamilyPool(models.Model):
     # las firmas (Modulo 3, paso 2).
     withdrawal_limit = models.CharField(max_length=32)
 
+    # Cost-basis de lo puesto en Blend (Modulo 3, paso 3), en XLM. Blend
+    # solo trackea el balance de shares (bTokens) del pool, no cuanto
+    # aporto originalmente en terminos de activo subyacente - sin este
+    # campo no hay forma de mostrar "generaste X de interes" (ver
+    # blend_client.compute_updated_principal para como se mantiene
+    # actualizado en cada supply/withdraw confirmado).
+    blend_principal = models.CharField(max_length=32, blank=True, default="0")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

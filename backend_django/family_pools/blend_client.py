@@ -38,21 +38,33 @@ es el "Plan B" ya incorporado por diseño, no un modo de emergencia aparte.
 """
 
 import time
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from django.conf import settings
-from stellar_sdk import Asset, TransactionBuilder, TransactionEnvelope, scval
+from stellar_sdk import Address, Asset, TransactionBuilder, TransactionEnvelope, scval
 from stellar_sdk.contract import ContractClient
 from stellar_sdk.contract.exceptions import SimulationFailedError
 from stellar_sdk.exceptions import BadRequestError, BaseHorizonError, ConnectionError
+from stellar_sdk.operation import InvokeHostFunction
 from stellar_sdk.soroban_rpc import GetTransactionStatus, SendTransactionStatus
 from stellar_sdk.soroban_server import SorobanServer
+from stellar_sdk.xdr import HostFunctionType
 
 REQUEST_TYPE_SUPPLY = 0
 REQUEST_TYPE_WITHDRAW = 1
 
 STROOPS_PER_LUMEN = Decimal(10_000_000)
+SCALAR_12 = Decimal(10**12)
+XLM_QUANTUM = Decimal("0.0000001")  # Stellar solo admite hasta 7 decimales
 TRANSACTION_TIMEOUT_SECONDS = 180
+
+
+def _quantize_xlm(value: Decimal) -> Decimal:
+    """Trunca (nunca redondea para arriba) a los 7 decimales que admite un
+    amount de Stellar. Se usa en todo calculo propio sobre montos en XLM
+    para no arrastrar precision fixed-point (SCALAR_12) que despues no se
+    podria ni representar en una tx real."""
+    return value.quantize(XLM_QUANTUM, rounding=ROUND_DOWN)
 POLL_ATTEMPTS = 15
 POLL_DELAY_SECONDS = 2.0
 
@@ -70,6 +82,17 @@ class BlendSimulationError(Exception):
     def __init__(self, message: str):
         self.message = message
         super().__init__(message)
+
+
+class BlendValidationError(Exception):
+    """La tx firmada que se pidio someter/leer no es una operacion simple
+    de Supply/Withdraw contra el pool de Blend configurado - nunca se
+    confia en lo que declare el caller sobre que operacion es, se valida
+    leyendo directo de la tx firmada."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason)
 
 
 def _xlm_reserve_address() -> str:
@@ -186,3 +209,129 @@ def _poll_transaction(soroban_server: SorobanServer, tx_hash: str) -> dict:
         f"No se pudo confirmar la transaccion a tiempo (hash={tx_hash}); puede seguir procesandose, "
         "consulta el estado mas tarde antes de reintentar."
     )
+
+
+def get_position(pool_account: str) -> dict:
+    """Posicion actual del pool en Blend, leida en vivo del contrato:
+    reusa las mismas dos funciones de lectura ya usadas/verificadas
+    durante el desarrollo de supply/withdraw (`get_positions` y
+    `get_reserve`), no duplica logica de invocacion nueva.
+
+    Devuelve bTokens crudos, el b_rate actual del reserve de XLM, y el
+    valor total redimible ya convertido a XLM (capital + interes juntos:
+    Blend no separa esto on-chain, ver compute_updated_principal).
+    """
+    client = _get_contract_client()
+    reserve_address = _xlm_reserve_address()
+
+    try:
+        positions = scval.to_native(
+            client.invoke("get_positions", parameters=[scval.to_address(pool_account)]).result()
+        )
+        reserve = scval.to_native(
+            client.invoke("get_reserve", parameters=[scval.to_address(reserve_address)]).result()
+        )
+    except SimulationFailedError as exc:
+        raise BlendSimulationError(str(exc)) from exc
+    except (ConnectionError, BaseHorizonError) as exc:
+        raise BlendUnavailableError(str(exc)) from exc
+
+    reserve_index = reserve["config"]["index"]
+    b_tokens = positions["supply"].get(reserve_index, 0)
+    b_rate = Decimal(reserve["data"]["b_rate"])
+
+    current_value_stroops = (Decimal(b_tokens) * b_rate / SCALAR_12).to_integral_value(rounding=ROUND_DOWN)
+
+    return {
+        "b_tokens": b_tokens,
+        "b_rate": str(b_rate / SCALAR_12),
+        "current_value": str(current_value_stroops / STROOPS_PER_LUMEN),
+    }
+
+
+def parse_submit_request(signed_xdr: str) -> tuple[int, str]:
+    """Extrae (request_type, amount_en_xlm) del unico Request de una tx de
+    `submit()` ya firmada - nunca se confia en lo que declare el caller
+    sobre que operacion es o que monto tiene, se lee directo de la tx
+    firmada (mismo patron que usa la validacion de retiros clasicos en
+    stellar_client.py). De paso confirma que la tx realmente le habla al
+    contrato de Blend configurado y no a otro.
+    """
+    try:
+        envelope = TransactionBuilder.from_xdr(signed_xdr, settings.STELLAR_NETWORK_PASSPHRASE)
+    except Exception as exc:
+        raise BlendValidationError("El XDR enviado no es una transaccion valida.") from exc
+
+    if not isinstance(envelope, TransactionEnvelope):
+        raise BlendValidationError("Se esperaba una transaccion simple, no un fee-bump.")
+
+    transaction = envelope.transaction
+    if len(transaction.operations) != 1:
+        raise BlendValidationError("La transaccion debe tener exactamente una operacion.")
+
+    operation = transaction.operations[0]
+    if not isinstance(operation, InvokeHostFunction):
+        raise BlendValidationError("La operacion no es un llamado a un contrato (InvokeHostFunction).")
+
+    host_function = operation.host_function
+    if host_function.type != HostFunctionType.HOST_FUNCTION_TYPE_INVOKE_CONTRACT:
+        raise BlendValidationError("El llamado no es una invocacion de contrato.")
+
+    invoke_args = host_function.invoke_contract
+    contract_address = Address.from_xdr_sc_address(invoke_args.contract_address).address
+    if contract_address != settings.BLEND_POOL_CONTRACT_ID:
+        raise BlendValidationError("La transaccion no llama al pool de Blend configurado.")
+
+    if invoke_args.function_name.sc_symbol.decode() != "submit":
+        raise BlendValidationError("La transaccion no llama a la funcion submit().")
+
+    if len(invoke_args.args) != 4:
+        raise BlendValidationError("La cantidad de argumentos de submit() no es la esperada.")
+
+    requests_native = scval.to_native(invoke_args.args[3])
+    if len(requests_native) != 1:
+        raise BlendValidationError("submit() debe tener exactamente un Request.")
+
+    parsed_request = requests_native[0]
+    if parsed_request["address"].address != _xlm_reserve_address():
+        raise BlendValidationError("El Request no es sobre la reserva de XLM.")
+
+    request_type = parsed_request["request_type"]
+    if request_type not in (REQUEST_TYPE_SUPPLY, REQUEST_TYPE_WITHDRAW):
+        raise BlendValidationError("Solo se permiten operaciones Supply o Withdraw simples (sin colateral).")
+
+    amount = str(Decimal(parsed_request["amount"]) / STROOPS_PER_LUMEN)
+    return request_type, amount
+
+
+def compute_updated_principal(
+    current_principal: str,
+    request_type: int,
+    amount: str,
+    value_before: str | None = None,
+) -> str:
+    """Nuevo cost-basis (FamilyPool.blend_principal) despues de un
+    supply/withdraw ya confirmado. Blend no trackea esto on-chain (solo
+    shares), asi que es la unica forma de despues poder mostrar "generaste
+    X de interes" en vez de solo el valor total actual.
+
+    - Supply: se suma el monto tal cual - el capital aportado es ese,
+      sin importar como fluctue el b_rate despues.
+    - Withdraw: el principal se reduce en la misma PROPORCION que se
+      redujo el valor total de la posicion (`value_before`, leido justo
+      antes de este withdraw via get_position), no en el monto nominal -
+      asi el interes ya generado no se le atribuye de mas ni de menos a
+      lo que queda despues.
+    """
+    principal = Decimal(current_principal or "0")
+    amount_decimal = Decimal(amount)
+
+    if request_type == REQUEST_TYPE_SUPPLY:
+        return str(_quantize_xlm(principal + amount_decimal))
+
+    if not value_before or Decimal(value_before) <= 0:
+        return "0"
+
+    value_before_decimal = Decimal(value_before)
+    remaining_fraction = max(Decimal(0), (value_before_decimal - amount_decimal) / value_before_decimal)
+    return str(_quantize_xlm(principal * remaining_fraction))

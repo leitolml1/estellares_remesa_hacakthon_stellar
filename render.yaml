@@ -1,0 +1,44 @@
+# Blueprint de Render para el backend Django (backend_django/). Los otros
+# proyectos del repo (backend/ NestJS, client/, smoke-test/) no se deployan
+# desde aca.
+#
+# rootDir hace que buildCommand/preDeployCommand/startCommand corran con
+# backend_django/ como working directory (asi no hace falta "cd" en cada
+# comando) - ver https://render.com/docs/monorepo-support.
+#
+# La base de datos sigue siendo Neon (no Postgres de Render): DATABASE_URL
+# se completa a mano en el dashboard la primera vez (sync: false = Render
+# lo pide en la creacion del Blueprint y despues no lo pisa).
+services:
+  - type: web
+    name: remesa-directa-backend
+    runtime: python
+    rootDir: backend_django
+    plan: free
+    buildCommand: "pip install -r requirements.txt && python manage.py collectstatic --no-input"
+    # preDeployCommand corre despues del build y ANTES de que la nueva
+    # instancia reciba trafico; si migrate falla, el deploy se cancela en
+    # vez de promocionar un codigo que su propio schema no soporta.
+    preDeployCommand: "python manage.py migrate --no-input"
+    startCommand: "gunicorn config.wsgi:application --bind 0.0.0.0:$PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.3"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: ""
+      - key: CORS_ALLOW_ALL_ORIGINS
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: STELLAR_HORIZON_URL
+        value: https://horizon-testnet.stellar.org
+      - key: STELLAR_NETWORK_PASSPHRASE
+        value: "Test SDF Network ; September 2015"
+      - key: STELLAR_SOROBAN_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: BLEND_POOL_CONTRACT_ID
+        value: CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF

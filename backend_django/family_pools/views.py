@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.response import Response
@@ -14,10 +15,15 @@ from payments.stellar_client import (
 from stellar_common.client import StellarAccountNotFoundError, StellarUnavailableError
 
 from .blend_client import (
+    REQUEST_TYPE_WITHDRAW,
     BlendSimulationError,
     BlendUnavailableError,
+    BlendValidationError,
     build_supply_tx,
     build_withdraw_from_blend_tx,
+    compute_updated_principal,
+    get_position,
+    parse_submit_request,
     submit_blend_tx,
 )
 from .models import FamilyPool, FamilyPoolDeposit
@@ -397,16 +403,49 @@ class BlendSubmitView(APIView):
     """POST /api/family-pools/<pool_account>/blend/submit/
 
     Recibe la tx de Blend (supply o withdraw) ya firmada por el quorum
-    familiar y la somete via Soroban RPC.
+    familiar y la somete via Soroban RPC. Ademas actualiza el cost-basis
+    (`blend_principal`) que este backend mantiene aparte, porque Blend
+    solo trackea shares (bTokens) y no cuanto se aporto originalmente -
+    sin esto, /blend/position/ no podria separar capital de interes.
+
+    Que operacion es y que monto tiene se leen de la tx firmada en si
+    (`parse_submit_request`), nunca de un campo declarado en el body.
     """
 
     def post(self, request, pool_account: str):
-        get_object_or_404(FamilyPool, pool_account=pool_account)
+        pool = get_object_or_404(FamilyPool, pool_account=pool_account)
         serializer = WithdrawalSubmitSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        signed_xdr = serializer.validated_data["signed_xdr"]
 
         try:
-            result = submit_blend_tx(serializer.validated_data["signed_xdr"])
+            request_type, amount = parse_submit_request(signed_xdr)
+        except BlendValidationError as exc:
+            return Response(
+                {"detail": f"La transaccion enviada no es una operacion valida de Blend: {exc.reason}"},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        # Para un withdraw hace falta el valor de la posicion ANTES de
+        # ejecutarlo, para poder prorratear cuanto de ese retiro es
+        # capital vs. interes ya generado (ver compute_updated_principal).
+        value_before = None
+        if request_type == REQUEST_TYPE_WITHDRAW:
+            try:
+                value_before = get_position(pool.pool_account)["current_value"]
+            except BlendSimulationError as exc:
+                return Response(
+                    {"detail": f"Blend rechazo la consulta previa al retiro: {exc.message}"},
+                    status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+            except BlendUnavailableError:
+                return Response(
+                    {"detail": "El servicio de Blend/Soroban no esta disponible, reintenta en unos segundos."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+        try:
+            result = submit_blend_tx(signed_xdr)
         except BlendSimulationError as exc:
             return Response(
                 {"detail": f"Blend rechazo la operacion: {exc.message}"},
@@ -418,4 +457,55 @@ class BlendSubmitView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
+        with transaction.atomic():
+            locked_pool = FamilyPool.objects.select_for_update().get(pk=pool.pk)
+            locked_pool.blend_principal = compute_updated_principal(
+                locked_pool.blend_principal, request_type, amount, value_before
+            )
+            locked_pool.save(update_fields=["blend_principal", "updated_at"])
+
         return Response(result)
+
+
+class BlendPositionView(APIView):
+    """GET /api/family-pools/<pool_account>/blend/position/
+
+    Posicion actual en Blend, leyendo el contrato en vivo (nunca datos
+    guardados para el valor total): capital aportado e interes acumulado,
+    separados. El capital sale de `blend_principal` (cost-basis que este
+    backend mantiene, ver BlendSubmitView) porque Blend no lo trackea
+    on-chain; el interes es la diferencia contra el valor actual real.
+    """
+
+    def get(self, request, pool_account: str):
+        pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+
+        try:
+            position = get_position(pool.pool_account)
+        except BlendSimulationError as exc:
+            return Response(
+                {"detail": f"Blend rechazo la consulta: {exc.message}"},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        except BlendUnavailableError:
+            return Response(
+                {"detail": "El servicio de Blend/Soroban no esta disponible, reintenta en unos segundos."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        current_value = Decimal(position["current_value"])
+        principal = Decimal(pool.blend_principal or "0")
+        # Puede dar levemente negativo por redondeo fixed-point entre
+        # Blend (SCALAR_12) y nuestro cost-basis en XLM: nunca se muestra
+        # interes negativo.
+        interest_earned = max(Decimal(0), current_value - principal)
+
+        return Response(
+            {
+                "capital": str(principal),
+                "interest_earned": str(interest_earned),
+                "current_value": position["current_value"],
+                "b_tokens": position["b_tokens"],
+                "b_rate": position["b_rate"],
+            }
+        )

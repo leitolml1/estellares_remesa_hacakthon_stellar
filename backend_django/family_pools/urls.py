@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    BlendPositionView,
     BlendSubmitView,
     BlendSupplyBuildView,
     BlendWithdrawBuildView,
@@ -49,5 +50,10 @@ urlpatterns = [
         "<str:pool_account>/blend/submit/",
         BlendSubmitView.as_view(),
         name="family-pool-blend-submit",
+    ),
+    path(
+        "<str:pool_account>/blend/position/",
+        BlendPositionView.as_view(),
+        name="family-pool-blend-position",
     ),
 ]
