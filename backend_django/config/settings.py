@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "payments",
     "pools",
+    "family_pools",
 ]
 
 MIDDLEWARE = [
@@ -127,9 +128,16 @@ REST_FRAMEWORK = {
 CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW_ALL_ORIGINS", True)
 
 
-# Stellar / Horizon
+# Stellar / Horizon / Soroban
 
 STELLAR_HORIZON_URL = os.environ.get("STELLAR_HORIZON_URL", "https://horizon-testnet.stellar.org")
 STELLAR_NETWORK_PASSPHRASE = os.environ.get(
     "STELLAR_NETWORK_PASSPHRASE", "Test SDF Network ; September 2015"
+)
+STELLAR_SOROBAN_RPC_URL = os.environ.get("STELLAR_SOROBAN_RPC_URL", "https://soroban-testnet.stellar.org")
+
+# Blend Protocol (lending sobre Soroban, no es un contrato propio) - pool
+# desplegado por el equipo de Blend en testnet.
+BLEND_POOL_CONTRACT_ID = os.environ.get(
+    "BLEND_POOL_CONTRACT_ID", "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF"
 )
