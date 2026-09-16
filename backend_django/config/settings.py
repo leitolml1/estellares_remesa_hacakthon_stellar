@@ -192,3 +192,10 @@ STELLAR_SOROBAN_RPC_URL = os.environ.get("STELLAR_SOROBAN_RPC_URL", "https://sor
 BLEND_POOL_CONTRACT_ID = os.environ.get(
     "BLEND_POOL_CONTRACT_ID", "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF"
 )
+
+# Vault comunitario (Modulo 2): contrato propio (Rust/Soroban) cuyo codigo
+# vive en vault_contract/ de la raiz del repo. Un solo contrato compartido
+# por todos los pools; el ID cambia con cada deploy (ver .env.example).
+VAULT_CONTRACT_ID = os.environ.get(
+    "VAULT_CONTRACT_ID", "CATQKYDF53TJDHK5WHXAXUAKV4GMPDLIJY5BB3PCUHE5RO467JDVILJK"
+)

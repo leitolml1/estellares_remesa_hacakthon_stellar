@@ -1,6 +1,8 @@
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Q
+from django.db.utils import NotSupportedError
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.response import Response
@@ -28,6 +30,8 @@ from .blend_client import (
 )
 from .models import FamilyPool, FamilyPoolDeposit
 from .serializers import (
+    AddDepositorSerializer,
+    AddSignerBuildSerializer,
     BlendAmountSerializer,
     BuildConfigureSignersSerializer,
     BuildCreateAccountSerializer,
@@ -35,6 +39,7 @@ from .serializers import (
     FamilyPoolDepositCreateSerializer,
     FamilyPoolDepositSerializer,
     FamilyPoolSerializer,
+    TrustlineBuildSerializer,
     WithdrawalBuildSerializer,
     WithdrawalSubmitSerializer,
 )
@@ -44,13 +49,77 @@ from .stellar_client import (
     StellarSubmissionError,
     WithdrawalLimitExceededError,
     WithdrawalValidationError,
+    build_add_signer_tx,
+    build_change_trust_tx,
     build_configure_signers_tx,
     build_create_account_tx,
     build_withdrawal_tx,
     compute_minimum_starting_balance,
     confirm_pool_setup,
+    submit_add_signer,
+    submit_change_trust,
     submit_withdrawal,
 )
+
+
+def is_family_signer(pool: FamilyPool, public_key: str) -> bool:
+    return any(signer.get("public_key") == public_key for signer in pool.signers or [])
+
+
+def is_family_member(pool: FamilyPool, public_key: str) -> bool:
+    if pool.creator == public_key:
+        return True
+    if is_family_signer(pool, public_key):
+        return True
+    return public_key in (pool.depositors or [])
+
+
+def family_pools_visible_to(public_key: str):
+    # Containment de JSONField (Postgres @>): matchea los signers que
+    # tienen esa public_key aunque traigan mas campos (weight), dejando
+    # que la DB filtre en vez de cargar cada pool. SQLite (dev local) no
+    # soporta este lookup, asi que ahi se cae al filtro en Python - mismo
+    # resultado, distinto costo.
+    try:
+        return list(
+            FamilyPool.objects.filter(
+                Q(creator=public_key)
+                | Q(signers__contains=[{"public_key": public_key}])
+                | Q(depositors__contains=public_key)
+                | Q(depositors__contains=[public_key])
+            )
+        )
+    except NotSupportedError:
+        return [pool for pool in FamilyPool.objects.all() if is_family_member(pool, public_key)]
+
+
+def require_family_viewer(request, pool: FamilyPool):
+    public_key = (
+        (request.query_params.get("public_key") or "").strip()
+        or (request.data.get("requester_public_key") or "").strip()
+        or (request.data.get("public_key") or "").strip()
+    )
+    if not public_key:
+        return Response(
+            {"detail": "Hace falta public_key para ver o gestionar esta caja."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not is_family_member(pool, public_key):
+        return Response(
+            {"detail": "Solo el creador o una wallet asociada puede ver esta caja familiar."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
+def stellar_submit_error_response(exc: StellarSubmissionError) -> Response:
+    status_by_category = {
+        "bad_seq": status.HTTP_409_CONFLICT,
+        "insufficient_signatures": status.HTTP_422_UNPROCESSABLE_ENTITY,
+        "underfunded": status.HTTP_422_UNPROCESSABLE_ENTITY,
+        "other": status.HTTP_400_BAD_REQUEST,
+    }
+    return Response({"detail": exc.message}, status=status_by_category[exc.category])
 
 
 class BuildCreateAccountView(APIView):
@@ -175,11 +244,42 @@ class ConfirmPoolSetupView(APIView):
             title=data["title"],
             creator=data["creator_public_key"],
             withdrawal_limit=data["withdrawal_limit"],
+            asset_withdrawal_limits=data.get("asset_withdrawal_limits") or {},
             signers=onchain["signers"],
+            depositors=data.get("depositors") or [],
+            wallet_roles=data.get("wallet_roles") or {},
             med_threshold=onchain["med_threshold"],
             high_threshold=onchain["high_threshold"],
         )
         return Response(FamilyPoolSerializer(pool).data, status=status.HTTP_201_CREATED)
+
+
+class FamilyPoolListView(APIView):
+    """GET /api/family-pools/?public_key=
+
+    Cajas donde la wallet es creadora o figura como firmante.
+    """
+
+    def get(self, request):
+        public_key = (request.query_params.get("public_key") or "").strip()
+        if not public_key:
+            return Response(
+                {"detail": "Hace falta public_key para listar tus cajas familiares."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        pools = family_pools_visible_to(public_key)
+        return Response({"pools": FamilyPoolSerializer(pools, many=True).data})
+
+
+class FamilyPoolDetailView(APIView):
+    """GET /api/family-pools/<pool_account>/?public_key="""
+
+    def get(self, request, pool_account: str):
+        pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        denied = require_family_viewer(request, pool)
+        if denied:
+            return denied
+        return Response(FamilyPoolSerializer(pool).data)
 
 
 class FamilyPoolDepositCreateView(APIView):
@@ -250,6 +350,11 @@ class WithdrawalBuildView(APIView):
         serializer = WithdrawalBuildSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        if not is_family_member(pool, data["requester_public_key"]):
+            return Response(
+                {"detail": "Solo el creador o una wallet asociada puede pedir retiros."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         try:
             xdr = build_withdrawal_tx(
@@ -258,6 +363,8 @@ class WithdrawalBuildView(APIView):
                 destination_public_key=data["destination_public_key"],
                 amount=data["amount"],
                 memo=data.get("memo") or None,
+                asset_code=data.get("asset_code") or "XLM",
+                asset_withdrawal_limits=pool.asset_withdrawal_limits,
             )
         except WithdrawalLimitExceededError as exc:
             return Response(
@@ -267,6 +374,11 @@ class WithdrawalBuildView(APIView):
                         f"para este pool ({exc.limit})."
                     )
                 },
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        except WithdrawalValidationError as exc:
+            return Response(
+                {"detail": str(exc.reason)},
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
         except StellarAccountNotFoundError:
@@ -296,6 +408,9 @@ class WithdrawalSubmitView(APIView):
 
     def post(self, request, pool_account: str):
         pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        denied = require_family_viewer(request, pool)
+        if denied:
+            return denied
         serializer = WithdrawalSubmitSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -304,6 +419,7 @@ class WithdrawalSubmitView(APIView):
                 pool_account=pool.pool_account,
                 withdrawal_limit=pool.withdrawal_limit,
                 signed_xdr=serializer.validated_data["signed_xdr"],
+                asset_withdrawal_limits=pool.asset_withdrawal_limits,
             )
         except WithdrawalValidationError as exc:
             return Response(
@@ -321,13 +437,7 @@ class WithdrawalSubmitView(APIView):
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
         except StellarSubmissionError as exc:
-            status_by_category = {
-                "bad_seq": status.HTTP_409_CONFLICT,
-                "insufficient_signatures": status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "underfunded": status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "other": status.HTTP_400_BAD_REQUEST,
-            }
-            return Response({"detail": exc.message}, status=status_by_category[exc.category])
+            return stellar_submit_error_response(exc)
         except StellarUnavailableError:
             return Response(
                 {"detail": "El servicio de Stellar Horizon no esta disponible, reintenta en unos segundos."},
@@ -335,6 +445,223 @@ class WithdrawalSubmitView(APIView):
             )
 
         return Response(result)
+
+
+class TrustlineBuildView(APIView):
+    """POST /api/family-pools/<pool_account>/trustlines/build/"""
+
+    def post(self, request, pool_account: str):
+        pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        serializer = TrustlineBuildSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        if not is_family_member(pool, serializer.validated_data["requester_public_key"]):
+            return Response(
+                {"detail": "Solo el creador o una wallet asociada puede abrir trustlines."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            xdr = build_change_trust_tx(pool.pool_account, serializer.validated_data["asset_code"])
+        except WithdrawalValidationError as exc:
+            return Response({"detail": str(exc.reason)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        except StellarAccountNotFoundError:
+            return Response(
+                {"detail": "La cuenta del pool no existe en la red Stellar."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except StellarUnavailableError:
+            return Response(
+                {"detail": "El servicio de Stellar Horizon no esta disponible, reintenta en unos segundos."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({"xdr": xdr})
+
+
+class TrustlineSubmitView(APIView):
+    """POST /api/family-pools/<pool_account>/trustlines/submit/"""
+
+    def post(self, request, pool_account: str):
+        pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        denied = require_family_viewer(request, pool)
+        if denied:
+            return denied
+        serializer = WithdrawalSubmitSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = submit_change_trust(pool.pool_account, serializer.validated_data["signed_xdr"])
+        except WithdrawalValidationError as exc:
+            return Response(
+                {"detail": f"La transaccion enviada no es un ChangeTrust valido: {exc.reason}"},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        except StellarSubmissionError as exc:
+            return stellar_submit_error_response(exc)
+        except StellarUnavailableError:
+            return Response(
+                {"detail": "El servicio de Stellar Horizon no esta disponible, reintenta en unos segundos."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(result)
+
+
+class AddSignerBuildView(APIView):
+    """POST /api/family-pools/<pool_account>/signers/build/"""
+
+    def post(self, request, pool_account: str):
+        pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        serializer = AddSignerBuildSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if pool.creator != data["requester_public_key"]:
+            return Response(
+                {"detail": "Solo quien creó esta caja puede agregar wallets."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            xdr = build_add_signer_tx(
+                pool.pool_account,
+                data["signer_public_key"],
+                data["weight"],
+            )
+        except WithdrawalValidationError as exc:
+            return Response({"detail": str(exc.reason)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        except StellarAccountNotFoundError:
+            return Response(
+                {"detail": "La cuenta del pool no existe en la red Stellar."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except PoolSetupIncompleteError as exc:
+            return Response(
+                {"detail": f"El setup on-chain todavia no es valido: {exc.reason}"},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        except StellarUnavailableError:
+            return Response(
+                {"detail": "El servicio de Stellar Horizon no esta disponible, reintenta en unos segundos."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({"xdr": xdr})
+
+
+class AddSignerSubmitView(APIView):
+    """POST /api/family-pools/<pool_account>/signers/submit/"""
+
+    def post(self, request, pool_account: str):
+        pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        requester = (
+            (request.data.get("requester_public_key") or "").strip()
+            or (request.data.get("public_key") or "").strip()
+        )
+        if pool.creator != requester:
+            return Response(
+                {"detail": "Solo quien creó esta caja puede someter el alta de wallets."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = WithdrawalSubmitSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = submit_add_signer(pool.pool_account, serializer.validated_data["signed_xdr"])
+        except WithdrawalValidationError as exc:
+            return Response(
+                {"detail": f"La transaccion enviada no es un alta de firmante valida: {exc.reason}"},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        except StellarSubmissionError as exc:
+            return stellar_submit_error_response(exc)
+        except PoolSetupIncompleteError as exc:
+            return Response(
+                {"detail": f"El setup on-chain todavia no es valido: {exc.reason}"},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        except StellarAccountNotFoundError:
+            return Response(
+                {"detail": "La cuenta del pool no existe en la red Stellar."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except StellarUnavailableError:
+            return Response(
+                {"detail": "El servicio de Stellar Horizon no esta disponible, reintenta en unos segundos."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        # El alta ya esta on-chain: si Horizon no responde para releer la
+        # config, se devuelve igual el exito con el snapshot que tenemos
+        # (resynced: false) - mentir con un 503 aca llevaria al cliente a
+        # reintentar un submit que ya sucedio. El proximo alta/listado
+        # vuelve a sincronizar contra el ledger.
+        try:
+            onchain = confirm_pool_setup(pool.pool_account)
+        except (StellarAccountNotFoundError, StellarUnavailableError, PoolSetupIncompleteError):
+            return Response({**result, "pool": FamilyPoolSerializer(pool).data, "resynced": False})
+
+        previous_signers = {signer.get("public_key") for signer in (pool.signers or [])}
+        roles = dict(pool.wallet_roles or {})
+        role = str(request.data.get("role") or "deposit_withdraw").strip().replace("-", "_")
+        if role not in ("deposit_withdraw", "withdraw"):
+            role = "deposit_withdraw"
+
+        pool.signers = onchain["signers"]
+        pool.med_threshold = onchain["med_threshold"]
+        pool.high_threshold = onchain["high_threshold"]
+        new_keys = {signer["public_key"] for signer in onchain["signers"]}
+        for key in new_keys - previous_signers:
+            roles[key] = role
+        pool.wallet_roles = roles
+        pool.depositors = [key for key in (pool.depositors or []) if key not in new_keys]
+        pool.save(
+            update_fields=[
+                "signers",
+                "med_threshold",
+                "high_threshold",
+                "wallet_roles",
+                "depositors",
+                "updated_at",
+            ]
+        )
+
+        return Response({**result, "pool": FamilyPoolSerializer(pool).data, "resynced": True})
+
+
+class AddDepositorView(APIView):
+    """POST /api/family-pools/<pool_account>/depositors/"""
+
+    def post(self, request, pool_account: str):
+        pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        serializer = AddDepositorSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if pool.creator != data["requester_public_key"]:
+            return Response(
+                {"detail": "Solo quien creó esta caja puede asociar depositantes."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        public_key = data["public_key"]
+        if is_family_signer(pool, public_key):
+            return Response(
+                {"detail": "Esa wallet ya puede firmar retiros de esta caja."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        depositors = list(pool.depositors or [])
+        if public_key in depositors:
+            return Response(
+                {"detail": "Esa wallet ya esta asociada para depositar."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        depositors.append(public_key)
+        roles = dict(pool.wallet_roles or {})
+        roles[public_key] = "deposit"
+        pool.depositors = depositors
+        pool.wallet_roles = roles
+        pool.save(update_fields=["depositors", "wallet_roles", "updated_at"])
+        return Response(FamilyPoolSerializer(pool).data)
 
 
 class BlendSupplyBuildView(APIView):
@@ -351,6 +678,11 @@ class BlendSupplyBuildView(APIView):
         pool = get_object_or_404(FamilyPool, pool_account=pool_account)
         serializer = BlendAmountSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        if not is_family_member(pool, serializer.validated_data["requester_public_key"]):
+            return Response(
+                {"detail": "Solo el creador o una wallet asociada puede operar Blend."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         try:
             xdr = build_supply_tx(pool.pool_account, serializer.validated_data["amount"])
@@ -382,6 +714,11 @@ class BlendWithdrawBuildView(APIView):
         pool = get_object_or_404(FamilyPool, pool_account=pool_account)
         serializer = BlendAmountSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        if not is_family_member(pool, serializer.validated_data["requester_public_key"]):
+            return Response(
+                {"detail": "Solo el creador o una wallet asociada puede operar Blend."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         try:
             xdr = build_withdraw_from_blend_tx(pool.pool_account, serializer.validated_data["amount"])
@@ -414,6 +751,9 @@ class BlendSubmitView(APIView):
 
     def post(self, request, pool_account: str):
         pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        denied = require_family_viewer(request, pool)
+        if denied:
+            return denied
         serializer = WithdrawalSubmitSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         signed_xdr = serializer.validated_data["signed_xdr"]
@@ -479,6 +819,9 @@ class BlendPositionView(APIView):
 
     def get(self, request, pool_account: str):
         pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        denied = require_family_viewer(request, pool)
+        if denied:
+            return denied
 
         try:
             position = get_position(pool.pool_account)

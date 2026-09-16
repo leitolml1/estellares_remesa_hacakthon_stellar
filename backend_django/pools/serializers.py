@@ -12,10 +12,29 @@ def _validate_stellar_public_key(value: str) -> str:
     return value
 
 
+def _validate_positive_decimal(value: str, field_label: str) -> str:
+    try:
+        amount = Decimal(value)
+    except InvalidOperation as exc:
+        raise serializers.ValidationError(f"{field_label} debe ser un numero valido.") from exc
+    if amount <= 0:
+        raise serializers.ValidationError(f"{field_label} debe ser mayor a 0.")
+    return value
+
+
 class PoolSerializer(serializers.ModelSerializer):
     class Meta:
         model = Pool
-        fields = ["id", "short_code", "wallet_address", "title", "goal_amount", "creator", "created_at"]
+        fields = [
+            "id",
+            "short_code",
+            "wallet_address",
+            "title",
+            "goal_amount",
+            "creator",
+            "vault_registered",
+            "created_at",
+        ]
         read_only_fields = fields
 
 
@@ -40,3 +59,54 @@ class PoolCreateSerializer(serializers.ModelSerializer):
         if amount <= 0:
             raise serializers.ValidationError("goal_amount debe ser mayor a 0.")
         return value
+
+
+class VaultRegisterBuildSerializer(serializers.Serializer):
+    owner_public_key = serializers.CharField()
+
+    def validate_owner_public_key(self, value: str) -> str:
+        return _validate_stellar_public_key(value)
+
+
+class VaultDepositBuildSerializer(serializers.Serializer):
+    donor_public_key = serializers.CharField()
+    asset_code = serializers.CharField(required=False, allow_blank=True, default="XLM")
+    amount = serializers.CharField()
+
+    def validate_donor_public_key(self, value: str) -> str:
+        return _validate_stellar_public_key(value)
+
+    def validate_asset_code(self, value: str) -> str:
+        code = (value or "XLM").strip().upper()
+        if code not in ("XLM", "USDC", "EURC"):
+            raise serializers.ValidationError("asset_code debe ser XLM, USDC o EURC.")
+        return code
+
+    def validate_amount(self, value: str) -> str:
+        return _validate_positive_decimal(value, "amount")
+
+
+class VaultWithdrawBuildSerializer(serializers.Serializer):
+    owner_public_key = serializers.CharField()
+    asset_code = serializers.CharField(required=False, allow_blank=True, default="XLM")
+    destination_public_key = serializers.CharField()
+    amount = serializers.CharField()
+
+    def validate_owner_public_key(self, value: str) -> str:
+        return _validate_stellar_public_key(value)
+
+    def validate_destination_public_key(self, value: str) -> str:
+        return _validate_stellar_public_key(value)
+
+    def validate_asset_code(self, value: str) -> str:
+        code = (value or "XLM").strip().upper()
+        if code not in ("XLM", "USDC", "EURC"):
+            raise serializers.ValidationError("asset_code debe ser XLM, USDC o EURC.")
+        return code
+
+    def validate_amount(self, value: str) -> str:
+        return _validate_positive_decimal(value, "amount")
+
+
+class VaultSubmitSerializer(serializers.Serializer):
+    signed_xdr = serializers.CharField()

@@ -1,0 +1,23 @@
+[package]
+name = "community-vault"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = "=25.3.2"
+
+[dev-dependencies]
+soroban-sdk = { version = "=25.3.2", features = ["testutils"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+panic = "abort"
+
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true

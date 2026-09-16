@@ -103,6 +103,9 @@ class ConfirmPoolSetupSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=140)
     creator_public_key = serializers.CharField()
     withdrawal_limit = serializers.CharField(max_length=32)
+    asset_withdrawal_limits = serializers.JSONField(required=False, default=dict)
+    depositors = serializers.JSONField(required=False, default=list)
+    wallet_roles = serializers.JSONField(required=False, default=dict)
 
     def validate_pool_public_key(self, value: str) -> str:
         value = _validate_public_key(value)
@@ -116,6 +119,49 @@ class ConfirmPoolSetupSerializer(serializers.Serializer):
     def validate_withdrawal_limit(self, value: str) -> str:
         return _validate_positive_decimal(value, "withdrawal_limit")
 
+    def validate_depositors(self, value: list) -> list:
+        if not value:
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("depositors debe ser una lista de public keys.")
+        keys = []
+        for item in value:
+            keys.append(_validate_public_key(str(item)))
+        if len(keys) != len(set(keys)):
+            raise serializers.ValidationError("No puede haber depositors repetidos.")
+        return keys
+
+    def validate_wallet_roles(self, value: dict) -> dict:
+        if not value:
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("wallet_roles debe ser un objeto {public_key: rol}.")
+        roles = {}
+        for key, role in value.items():
+            public_key = _validate_public_key(str(key))
+            normalized = str(role).strip().replace("-", "_")
+            if normalized not in ("deposit_withdraw", "withdraw", "deposit"):
+                raise serializers.ValidationError(
+                    "Cada rol debe ser deposit_withdraw, withdraw o deposit."
+                )
+            roles[public_key] = normalized
+        return roles
+
+    def validate_asset_withdrawal_limits(self, value: dict) -> dict:
+        if not value:
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("asset_withdrawal_limits debe ser un objeto {asset: limite}.")
+        limits = {}
+        for code, limit in value.items():
+            normalized = str(code).strip().upper()
+            if normalized not in ("USDC", "EURC"):
+                raise serializers.ValidationError(
+                    "asset_withdrawal_limits solo admite USDC o EURC como asset."
+                )
+            limits[normalized] = _validate_positive_decimal(str(limit), f"el limite de {normalized}")
+        return limits
+
 
 class FamilyPoolSerializer(serializers.ModelSerializer):
     class Meta:
@@ -126,9 +172,12 @@ class FamilyPoolSerializer(serializers.ModelSerializer):
             "title",
             "creator",
             "signers",
+            "depositors",
+            "wallet_roles",
             "med_threshold",
             "high_threshold",
             "withdrawal_limit",
+            "asset_withdrawal_limits",
             "created_at",
         ]
         read_only_fields = fields
@@ -167,6 +216,8 @@ class WithdrawalBuildSerializer(serializers.Serializer):
     destination_public_key = serializers.CharField()
     amount = serializers.CharField()
     memo = serializers.CharField(required=False, allow_blank=True, max_length=28)
+    asset_code = serializers.CharField(required=False, allow_blank=True, default="XLM")
+    requester_public_key = serializers.CharField()
 
     def validate_destination_public_key(self, value: str) -> str:
         return _validate_public_key(value)
@@ -174,15 +225,75 @@ class WithdrawalBuildSerializer(serializers.Serializer):
     def validate_amount(self, value: str) -> str:
         return _validate_positive_decimal(value, "amount")
 
+    def validate_asset_code(self, value: str) -> str:
+        code = (value or "XLM").strip().upper()
+        if code not in ("XLM", "USDC", "EURC"):
+            raise serializers.ValidationError("asset_code debe ser XLM, USDC o EURC.")
+        return code
+
+    def validate_requester_public_key(self, value: str) -> str:
+        return _validate_public_key(value)
+
+
+class TrustlineBuildSerializer(serializers.Serializer):
+    asset_code = serializers.CharField()
+    requester_public_key = serializers.CharField()
+
+    def validate_asset_code(self, value: str) -> str:
+        code = value.strip().upper()
+        if code not in ("USDC", "EURC"):
+            raise serializers.ValidationError("asset_code debe ser USDC o EURC.")
+        return code
+
+    def validate_requester_public_key(self, value: str) -> str:
+        return _validate_public_key(value)
+
+
+class AddSignerBuildSerializer(serializers.Serializer):
+    signer_public_key = serializers.CharField()
+    weight = serializers.IntegerField(min_value=1, max_value=MAX_SIGNER_WEIGHT)
+    requester_public_key = serializers.CharField()
+    role = serializers.CharField(required=False, default="deposit_withdraw")
+
+    def validate_signer_public_key(self, value: str) -> str:
+        return _validate_public_key(value)
+
+    def validate_requester_public_key(self, value: str) -> str:
+        return _validate_public_key(value)
+
+    def validate_role(self, value: str) -> str:
+        normalized = (value or "deposit_withdraw").strip().replace("-", "_")
+        if normalized not in ("deposit_withdraw", "withdraw"):
+            raise serializers.ValidationError("Un firmante de retiro debe tener rol deposit_withdraw o withdraw.")
+        return normalized
+
+
+class AddDepositorSerializer(serializers.Serializer):
+    public_key = serializers.CharField()
+    requester_public_key = serializers.CharField()
+
+    def validate_public_key(self, value: str) -> str:
+        return _validate_public_key(value)
+
+    def validate_requester_public_key(self, value: str) -> str:
+        return _validate_public_key(value)
+
 
 class WithdrawalSubmitSerializer(serializers.Serializer):
     signed_xdr = serializers.CharField()
 
 
 class BlendAmountSerializer(serializers.Serializer):
-    """Input comun a supply/withdraw de Blend: un monto en XLM."""
+    """Input comun a supply/withdraw de Blend: un monto en XLM mas la
+    wallet que pide la operacion (para el chequeo de membresia en la
+    vista, igual que en los retiros).
+    """
 
     amount = serializers.CharField()
+    requester_public_key = serializers.CharField()
 
     def validate_amount(self, value: str) -> str:
         return _validate_positive_decimal(value, "amount")
+
+    def validate_requester_public_key(self, value: str) -> str:
+        return _validate_public_key(value)

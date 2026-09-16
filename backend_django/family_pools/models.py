@@ -31,14 +31,24 @@ class FamilyPool(models.Model):
     creator = models.CharField(max_length=STELLAR_PUBLIC_KEY_LENGTH)
 
     signers = models.JSONField()  # [{"public_key": "G...", "weight": 1}, ...]
+    # Wallets que pueden ver la caja y depositar, sin firmar retiros.
+    depositors = models.JSONField(default=list, blank=True)
+    # {"G...": "deposit_withdraw" | "withdraw" | "deposit"}
+    wallet_roles = models.JSONField(default=dict, blank=True)
     med_threshold = models.PositiveSmallIntegerField()
     high_threshold = models.PositiveSmallIntegerField()
 
-    # Tope de monto por retiro: el multisig nativo de Stellar no valida
+    # Topes de monto por retiro: el multisig nativo de Stellar no valida
     # montos (el protocolo no sabe de "limites por operacion"), asi que
     # esto lo hace 100% el backend antes de armar la tx de retiro y pedir
-    # las firmas (Modulo 3, paso 2).
+    # las firmas (Modulo 3, paso 2). `withdrawal_limit` es el tope para
+    # XLM; `asset_withdrawal_limits` lleva un tope propio por asset no
+    # nativo ({"USDC": "100", ...}). Un asset no nativo sin tope
+    # configurado NO se puede retirar: nunca se reusa el tope de XLM para
+    # otro asset porque "100 XLM" y "100 USDC" no representan el mismo
+    # valor.
     withdrawal_limit = models.CharField(max_length=32)
+    asset_withdrawal_limits = models.JSONField(default=dict, blank=True)
 
     # Cost-basis de lo puesto en Blend (Modulo 3, paso 3), en XLM. Blend
     # solo trackea el balance de shares (bTokens) del pool, no cuanto

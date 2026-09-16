@@ -34,6 +34,12 @@ class Pool(models.Model):
     total_donated_by_asset = models.JSONField(default=dict, blank=True)
     donations_synced_cursor = models.CharField(max_length=64, blank=True, null=True)
 
+    # True una vez que la wallet del pool firmo el create_pool del vault
+    # comunitario (contrato Soroban propio, ver pools/vault_client.py).
+    # Los pools creados antes del vault no lo tienen, y siguen funcionando
+    # con el modelo clasico de donaciones directo a la wallet.
+    vault_registered = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

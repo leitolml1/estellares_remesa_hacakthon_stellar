@@ -14,6 +14,7 @@ from decimal import Decimal
 from django.db import transaction
 from stellar_sdk.exceptions import BaseHorizonError, ConnectionError, NotFoundError
 
+from stellar_common.assets import CIRCLE_TESTNET_XLM_REFERENCE_RATES
 from stellar_common.client import (
     PAYMENT_LIKE_OPERATION_TYPES,
     StellarAccountNotFoundError,
@@ -107,10 +108,15 @@ def _sync_pool_donations(pool: Pool) -> None:
         if not raw_records:
             break
 
+        # Auto-donaciones (del creador o de la propia wallet que recibe) no
+        # cuentan: no inflan el progreso ni la meta del pool.
+        self_senders = {pool.creator, pool.wallet_address}
         incoming = [
             op
             for op in raw_records
-            if op.get("type") in PAYMENT_LIKE_OPERATION_TYPES and op.get("to") == pool.wallet_address
+            if op.get("type") in PAYMENT_LIKE_OPERATION_TYPES
+            and op.get("to") == pool.wallet_address
+            and op.get("from") not in self_senders
         ]
         if incoming:
             try:
@@ -137,6 +143,70 @@ def _sync_pool_donations(pool: Pool) -> None:
     pool.donations_synced_cursor = cursor
 
 
+def fetch_pool_donations(pool: Pool, limit: int = 20) -> list[dict]:
+    """Ultimas donaciones REALES del pool: pagos entrantes a la wallet con
+    memo == short_code, exactamente el mismo criterio que usa
+    `_sync_pool_donations` para contar el progreso. Nada mas entra en el
+    feed: ni gastos salientes de la wallet, ni pagos entrantes sin memo
+    (que serian actividad no relacionada con el pool).
+
+    Cada record trae los datos crudos del ledger; el memo vive en la tx
+    padre, asi que se resuelve en batches como en la sync.
+    """
+    server = get_server()
+    try:
+        page = (
+            server.payments()
+            .for_account(pool.wallet_address)
+            .order(desc=True)
+            .limit(max(1, min(limit, 50)))
+            .call()
+        )
+    except NotFoundError as exc:
+        raise StellarAccountNotFoundError(pool.wallet_address) from exc
+    except (ConnectionError, BaseHorizonError) as exc:
+        raise StellarUnavailableError(str(exc)) from exc
+
+    raw_records = page["_embedded"]["records"]
+    # Mismo criterio que la sync: las auto-donaciones (creador / wallet
+    # receptora) tampoco entran al feed.
+    self_senders = {pool.creator, pool.wallet_address}
+    incoming = [
+        op
+        for op in raw_records
+        if op.get("type") in PAYMENT_LIKE_OPERATION_TYPES
+        and op.get("to") == pool.wallet_address
+        and op.get("from") not in self_senders
+    ]
+    if not incoming:
+        return []
+
+    try:
+        memos_by_hash = _fetch_memos_in_batches(
+            server, [op["transaction_hash"] for op in incoming]
+        )
+    except (ConnectionError, BaseHorizonError) as exc:
+        raise StellarUnavailableError(str(exc)) from exc
+
+    records = []
+    for op in incoming:
+        if memos_by_hash.get(op["transaction_hash"]) != pool.short_code:
+            continue
+        asset_code, asset_issuer = asset_fields(op)
+        records.append(
+            {
+                "operation_id": op["id"],
+                "sender": op["from"],
+                "amount": op["amount"],
+                "asset_code": asset_code,
+                "asset_issuer": asset_issuer,
+                "transaction_hash": op["transaction_hash"],
+                "created_at": op["created_at"],
+            }
+        )
+    return records
+
+
 def get_pool_with_synced_progress(short_code: str) -> Pool:
     """Trae el pool por `short_code` y sincroniza su progreso contra
     Horizon de forma atomica (select_for_update): si dos requests consultan
@@ -160,9 +230,36 @@ def get_pool_with_synced_progress(short_code: str) -> Pool:
 
 
 def progress_summary(pool: Pool) -> dict:
+    """Progreso del pool + estado de la meta.
+
+    `xlm_equivalent_total` suma las donaciones de TODOS los assets
+    convertidas a XLM con la tasa referencial de stellar_common.assets
+    (testnet no tiene mercado DEX para USDC/EURC, no hay precio on-chain).
+    `completed` es fail-closed: si hay donaciones en un asset sin tasa
+    referencial, la meta no se puede marcar como cumplida (y el equivalente
+    se devuelve en None) - mejor dejar el pool abierto un rato mas que
+    cerrarlo por un conteo incompleto.
+    """
     total_by_asset = []
+    xlm_equivalent = Decimal(pool.total_donated_by_asset.get("XLM", "0"))
+    rates_complete = True
     for key, total in pool.total_donated_by_asset.items():
         asset_code, asset_issuer = _split_asset_key(key)
         total_by_asset.append({"asset_code": asset_code, "asset_issuer": asset_issuer, "total": total})
+        if asset_issuer is None:
+            continue
+        rate = CIRCLE_TESTNET_XLM_REFERENCE_RATES.get(asset_code)
+        if rate is None:
+            rates_complete = False
+            continue
+        xlm_equivalent += Decimal(total) * Decimal(rate)
 
-    return {"donation_count": pool.donation_count, "total_by_asset": total_by_asset}
+    goal = pool.goal_amount
+    completed = bool(goal and rates_complete and xlm_equivalent >= Decimal(goal))
+
+    return {
+        "donation_count": pool.donation_count,
+        "total_by_asset": total_by_asset,
+        "xlm_equivalent_total": str(xlm_equivalent) if rates_complete else None,
+        "completed": completed,
+    }

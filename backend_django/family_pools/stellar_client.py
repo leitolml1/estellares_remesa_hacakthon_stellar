@@ -31,12 +31,15 @@ from decimal import Decimal
 from django.conf import settings
 from stellar_sdk import Asset, TransactionBuilder, TransactionEnvelope
 from stellar_sdk.exceptions import BadRequestError, BaseHorizonError, ConnectionError, NotFoundError
-from stellar_sdk.operation import Payment
+from stellar_sdk.operation import ChangeTrust, Payment, SetOptions
+from stellar_sdk.signer_key import SignerKeyType
 
+from stellar_common.assets import CIRCLE_TESTNET_ASSET_ISSUERS
 from stellar_common.client import StellarAccountNotFoundError, StellarUnavailableError, get_server
 
 TRANSACTION_TIMEOUT_SECONDS = 180
 STROOPS_PER_LUMEN = Decimal(10_000_000)
+MAX_THRESHOLD = 255
 
 
 class StellarAccountAlreadyExistsError(Exception):
@@ -99,7 +102,7 @@ class StellarSubmissionError(Exception):
         if transaction_code == "tx_bad_auth" or "op_bad_auth" in operation_codes:
             return cls(
                 "insufficient_signatures",
-                "Faltan firmas o el peso combinado no alcanza el medThreshold configurado para retiros.",
+                "Faltan firmas o el peso combinado no alcanza el umbral requerido.",
             )
         if "op_underfunded" in operation_codes:
             return cls("underfunded", "Fondos insuficientes en la cuenta del pool para este retiro.")
@@ -251,23 +254,63 @@ def confirm_pool_setup(pool_public_key: str) -> dict:
     }
 
 
+def resolve_circle_or_native_asset(asset_code: str | None) -> Asset:
+    code = (asset_code or "XLM").strip().upper()
+    if code in ("", "XLM", "NATIVE"):
+        return Asset.native()
+    issuer = CIRCLE_TESTNET_ASSET_ISSUERS.get(code)
+    if not issuer:
+        raise WithdrawalValidationError("Solo se admiten XLM, USDC o EURC de Circle testnet.")
+    return Asset(code, issuer)
+
+
+def _assert_supported_payment_asset(asset: Asset) -> None:
+    if asset.is_native():
+        return
+    issuer = CIRCLE_TESTNET_ASSET_ISSUERS.get(asset.code)
+    if not issuer or asset.issuer != issuer:
+        raise WithdrawalValidationError("Solo se admiten XLM, USDC o EURC de Circle testnet.")
+
+
+def _effective_withdrawal_limit(asset: Asset, withdrawal_limit: str, asset_limits: dict) -> str:
+    """Tope que aplica a un retiro segun su asset: `withdrawal_limit` es
+    el tope en XLM y cada asset no nativo necesita el suyo propio - nunca
+    se reusa el tope de XLM para otro asset porque "100 XLM" y "100 USDC"
+    no representan el mismo valor. Sin tope configurado, el asset no se
+    puede retirar (fail closed).
+    """
+    if asset.is_native():
+        return withdrawal_limit
+    limit = (asset_limits or {}).get(asset.code)
+    if not limit:
+        raise WithdrawalValidationError(
+            f"Esta caja no tiene limite de retiro configurado para {asset.code}: "
+            "no se pueden retirar assets sin un tope propio."
+        )
+    return str(limit)
+
+
 def build_withdrawal_tx(
     pool_account: str,
     withdrawal_limit: str,
     destination_public_key: str,
     amount: str,
     memo: str | None = None,
+    asset_code: str | None = None,
+    asset_withdrawal_limits: dict | None = None,
 ) -> str:
     """Arma (sin firmar) la tx Payment de un retiro desde la cuenta del
     pool.
 
-    CRITICO: el chequeo de `withdrawal_limit` es lo primero que pasa aca,
+    CRITICO: el chequeo del tope de retiro es lo primero que pasa aca,
     antes de tocar Horizon o construir nada - nunca se confia en que el
     frontend ya "aprobo" un monto, se revalida siempre contra la config
     guardada en este backend (nunca en base a lo que declare el caller).
     """
-    if Decimal(amount) > Decimal(withdrawal_limit):
-        raise WithdrawalLimitExceededError(amount, withdrawal_limit)
+    asset = resolve_circle_or_native_asset(asset_code)
+    limit = _effective_withdrawal_limit(asset, withdrawal_limit, asset_withdrawal_limits)
+    if Decimal(amount) > Decimal(limit):
+        raise WithdrawalLimitExceededError(amount, limit)
 
     server = get_server()
     try:
@@ -282,7 +325,7 @@ def build_withdrawal_tx(
         pool_stellar_account,
         network_passphrase=settings.STELLAR_NETWORK_PASSPHRASE,
         base_fee=base_fee,
-    ).append_payment_op(destination=destination_public_key, asset=Asset.native(), amount=amount)
+    ).append_payment_op(destination=destination_public_key, asset=asset, amount=amount)
 
     if memo:
         builder = builder.add_text_memo(memo)
@@ -291,7 +334,12 @@ def build_withdrawal_tx(
     return tx.to_xdr()
 
 
-def _validate_signed_withdrawal(pool_account: str, withdrawal_limit: str, signed_xdr: str) -> TransactionEnvelope:
+def _validate_signed_withdrawal(
+    pool_account: str,
+    withdrawal_limit: str,
+    signed_xdr: str,
+    asset_withdrawal_limits: dict | None = None,
+) -> TransactionEnvelope:
     """Extrae el monto/destino/source directo de la tx ya firmada (no de
     lo que declare el body del request) y los valida, incluyendo un
     segundo chequeo de withdrawal_limit: defensa en profundidad por si
@@ -319,18 +367,194 @@ def _validate_signed_withdrawal(pool_account: str, withdrawal_limit: str, signed
     if operation.source is not None and operation.source.account_id != pool_account:
         raise WithdrawalValidationError("La operacion tiene un source distinto a la cuenta del pool.")
 
-    if not operation.asset.is_native():
-        raise WithdrawalValidationError("Los retiros de la caja familiar solo admiten XLM nativo.")
+    _assert_supported_payment_asset(operation.asset)
 
-    if Decimal(operation.amount) > Decimal(withdrawal_limit):
-        raise WithdrawalLimitExceededError(operation.amount, withdrawal_limit)
+    limit = _effective_withdrawal_limit(operation.asset, withdrawal_limit, asset_withdrawal_limits)
+    if Decimal(operation.amount) > Decimal(limit):
+        raise WithdrawalLimitExceededError(operation.amount, limit)
 
     return envelope
 
 
-def submit_withdrawal(pool_account: str, withdrawal_limit: str, signed_xdr: str) -> dict:
-    envelope = _validate_signed_withdrawal(pool_account, withdrawal_limit, signed_xdr)
+def submit_withdrawal(
+    pool_account: str,
+    withdrawal_limit: str,
+    signed_xdr: str,
+    asset_withdrawal_limits: dict | None = None,
+) -> dict:
+    envelope = _validate_signed_withdrawal(
+        pool_account, withdrawal_limit, signed_xdr, asset_withdrawal_limits
+    )
 
+    server = get_server()
+    try:
+        response = server.submit_transaction(envelope)
+    except BadRequestError as exc:
+        raise StellarSubmissionError.from_bad_request(exc) from exc
+    except (ConnectionError, BaseHorizonError) as exc:
+        raise StellarUnavailableError(str(exc)) from exc
+
+    return {"hash": response["hash"], "ledger": response["ledger"]}
+
+
+def _load_pool_builder(pool_account: str) -> tuple[TransactionBuilder, object]:
+    server = get_server()
+    try:
+        pool_stellar_account = server.load_account(pool_account)
+        base_fee = server.fetch_base_fee()
+    except NotFoundError as exc:
+        raise StellarAccountNotFoundError(pool_account) from exc
+    except (ConnectionError, BaseHorizonError) as exc:
+        raise StellarUnavailableError(str(exc)) from exc
+
+    builder = TransactionBuilder(
+        pool_stellar_account,
+        network_passphrase=settings.STELLAR_NETWORK_PASSPHRASE,
+        base_fee=base_fee,
+    )
+    return builder, server
+
+
+def build_change_trust_tx(pool_account: str, asset_code: str) -> str:
+    """ChangeTrust (source=pool) para que la caja pueda recibir USDC/EURC.
+    Es una operacion de umbral medio: el mismo quorum que un retiro.
+    """
+    asset = resolve_circle_or_native_asset(asset_code)
+    if asset.is_native():
+        raise WithdrawalValidationError("XLM nativo no necesita trustline.")
+
+    builder, _server = _load_pool_builder(pool_account)
+    tx = builder.append_change_trust_op(asset=asset).set_timeout(TRANSACTION_TIMEOUT_SECONDS).build()
+    return tx.to_xdr()
+
+
+def build_add_signer_tx(pool_account: str, signer_public_key: str, weight: int) -> str:
+    """Agrega un firmante y sube highThreshold para seguir exigiendo
+    acuerdo unanime. Requiere el umbral alto (toda la familia actual).
+    """
+    onchain = confirm_pool_setup(pool_account)
+    existing = {signer["public_key"] for signer in onchain["signers"]}
+    if signer_public_key in existing or signer_public_key == pool_account:
+        raise WithdrawalValidationError("Esa wallet ya es firmante de esta caja.")
+
+    new_high = onchain["high_threshold"] + weight
+    if new_high > MAX_THRESHOLD:
+        raise WithdrawalValidationError(
+            f"La suma de weights ({new_high}) no puede superar {MAX_THRESHOLD}."
+        )
+
+    builder, _server = _load_pool_builder(pool_account)
+    tx = (
+        builder.append_ed25519_public_key_signer(signer_public_key, weight)
+        .append_set_options_op(high_threshold=new_high)
+        .set_timeout(TRANSACTION_TIMEOUT_SECONDS)
+        .build()
+    )
+    return tx.to_xdr()
+
+
+def _envelope_from_signed_xdr(signed_xdr: str) -> TransactionEnvelope:
+    try:
+        envelope = TransactionBuilder.from_xdr(signed_xdr, settings.STELLAR_NETWORK_PASSPHRASE)
+    except Exception as exc:
+        raise WithdrawalValidationError("El XDR enviado no es una transaccion valida.") from exc
+
+    if not isinstance(envelope, TransactionEnvelope):
+        raise WithdrawalValidationError("Se esperaba una transaccion simple, no un fee-bump.")
+    return envelope
+
+
+def submit_change_trust(pool_account: str, signed_xdr: str) -> dict:
+    envelope = _envelope_from_signed_xdr(signed_xdr)
+    transaction = envelope.transaction
+    if transaction.source.account_id != pool_account:
+        raise WithdrawalValidationError("La transaccion no tiene como source la cuenta de este pool.")
+    if len(transaction.operations) != 1 or not isinstance(transaction.operations[0], ChangeTrust):
+        raise WithdrawalValidationError("La transaccion no es un ChangeTrust de esta caja.")
+
+    asset = transaction.operations[0].asset
+    _assert_supported_payment_asset(asset)
+    if asset.is_native():
+        raise WithdrawalValidationError("XLM nativo no necesita trustline.")
+
+    return _submit_pool_envelope(envelope)
+
+
+def _set_options_touched_fields(operation: SetOptions) -> set[str]:
+    """Nombres de los campos de configuracion que esta operacion SetOptions
+    efectivamente toca (los que no quedaron en None).
+    """
+    fields = (
+        "inflation_dest",
+        "clear_flags",
+        "set_flags",
+        "master_weight",
+        "low_threshold",
+        "med_threshold",
+        "high_threshold",
+        "home_domain",
+        "signer",
+    )
+    return {field for field in fields if getattr(operation, field) is not None}
+
+
+def submit_add_signer(pool_account: str, signed_xdr: str) -> dict:
+    """Somete un alta de firmante, validando la ESTRUCTURA de la tx firmada
+    igual que se valida un retiro: la unica forma admitida es la que arma
+    build_add_signer_tx, o sea exactamente dos operaciones SetOptions -
+    (1) dar de alta un signer ed25519 nuevo con peso >= 1, (2) subir
+    high_threshold. Todo lo demas (borrar signers via weight 0, restaurar
+    master_weight, bajar thresholds) se rechaza aca, sin confiar en que
+    la tx haya pasado por build/.
+    """
+    envelope = _envelope_from_signed_xdr(signed_xdr)
+    transaction = envelope.transaction
+    if transaction.source.account_id != pool_account:
+        raise WithdrawalValidationError("La transaccion no tiene como source la cuenta de este pool.")
+
+    operations = transaction.operations
+    if len(operations) != 2 or not all(isinstance(operation, SetOptions) for operation in operations):
+        raise WithdrawalValidationError(
+            "La tx de alta de firmante debe tener exactamente dos operaciones SetOptions."
+        )
+
+    add_op, threshold_op = operations
+
+    if _set_options_touched_fields(add_op) != {"signer"}:
+        raise WithdrawalValidationError(
+            "La primera operacion solo puede dar de alta un signer, sin tocar otra configuracion."
+        )
+    signer = add_op.signer
+    if (
+        signer is None
+        or signer.signer_key.signer_key_type != SignerKeyType.SIGNER_KEY_TYPE_ED25519
+        or (signer.weight or 0) < 1
+    ):
+        raise WithdrawalValidationError(
+            "La primera operacion tiene que dar de alta una wallet ed25519 con peso >= 1."
+        )
+    signer_public_key = signer.signer_key.encoded_signer_key
+
+    if _set_options_touched_fields(threshold_op) != {"high_threshold"}:
+        raise WithdrawalValidationError(
+            "La segunda operacion solo puede subir high_threshold, sin tocar otra configuracion."
+        )
+
+    onchain = confirm_pool_setup(pool_account)
+    existing = {existing_signer["public_key"] for existing_signer in onchain["signers"]}
+    if signer_public_key == pool_account or signer_public_key in existing:
+        raise WithdrawalValidationError("Esa wallet ya es firmante de esta caja (o es la master key).")
+    if not (
+        onchain["high_threshold"] <= threshold_op.high_threshold <= MAX_THRESHOLD
+    ):
+        raise WithdrawalValidationError(
+            "high_threshold solo puede subir (y seguir dentro del rango 0-255)."
+        )
+
+    return _submit_pool_envelope(envelope)
+
+
+def _submit_pool_envelope(envelope: TransactionEnvelope) -> dict:
     server = get_server()
     try:
         response = server.submit_transaction(envelope)
