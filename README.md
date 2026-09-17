@@ -1,23 +1,30 @@
 # Remesa Directa
 
-Remesa Directa es una app para mandar dinero y ahorrar en familia usando
-Stellar, sin que un banco o una billetera virtual se quede con comisión ni
-retenga los fondos. Todo corre sobre la testnet de Stellar; el backend nunca
-ve ni firma una clave privada — arma la transacción, el usuario la firma con
-su wallet (Freighter) y recién ahí se manda a la red.
+**Argentina Builder Challenge (BAF x Stellar) — Track Genesis.**
+
+Remesa Directa resuelve un problema concreto: mandar dinero entre familias
+(por ejemplo, remesas del exterior) y organizar la plata compartida de una
+familia hoy pasa por bancos o billeteras virtuales que cobran comisión,
+tardan días y a veces retienen el dinero. Remesa Directa lo resuelve con
+Stellar: mandar dinero, juntar donaciones para una causa común, y ahorrar en
+familia con reglas claras de quién puede sacar cuánto — todo con comisiones
+de fracciones de centavo, confirmación en segundos, y sin que la app misma
+pueda tocar los fondos en ningún momento. El backend nunca ve ni firma una
+clave privada — arma la transacción, el usuario la firma con su wallet
+(Freighter) y recién ahí se manda a la red.
 
 **Por qué Stellar**: comisiones de fracciones de centavo, confirmación en
 segundos, y soporte nativo para stablecoins (USDC/EURC de Circle), multisig
 de cuenta y contratos inteligentes (Soroban) — todo lo que necesitábamos para
 los tres módulos sin tener que montar infraestructura propia de custodia.
 
-- **Backend en producción**: `<COMPLETAR: URL de Render>`
+- **API en producción (Render)**: `<COMPLETAR: URL de Render>`
 - **Frontend en producción**: `<COMPLETAR: URL si está deployado>`
 - **Red**: Stellar Testnet (Horizon + Soroban RPC)
 
-## Los tres módulos
+## Los tres módulos (los 3 completos y probados en vivo contra testnet)
 
-### 1. Pagos P2P con metadata
+### 1. Pagos P2P con metadata — ✅ completo
 
 Mandar plata a otra wallet, en XLM, USDC o EURC, con nota y categoría de
 gasto (algo que Stellar no guarda pero sí es útil para el usuario). Incluye:
@@ -35,7 +42,7 @@ gasto (algo que Stellar no guarda pero sí es útil para el usuario). Incluye:
   próxima fecha) y el frontend le recuerda al usuario pagar con su wallet
   cuando vence.
 
-### 2. Pools de donación comunitaria
+### 2. Pools de donación comunitaria — ✅ completo
 
 Cualquiera dona a un pool escaneando un QR (URI SEP-7, la abre cualquier
 wallet Stellar, no hace falta tener la app instalada). La donación se
@@ -50,7 +57,7 @@ el backend:
 - **Leaderboard de donantes** on-chain: ranking de quién donó más a cada
   pool, leído directo del contrato.
 
-### 3. Caja de ahorro familiar (multisig + Blend)
+### 3. Caja de ahorro familiar (multisig + Blend) — ✅ completo
 
 Una cuenta Stellar compartida por una familia, con **multisig nativo** (no
 un contrato — el mecanismo propio de Stellar de firmantes y umbrales):
@@ -87,13 +94,14 @@ que la blockchain no tiene (notas, categorías, título del pool).
 
 ## Stack técnico
 
-- **Backend**: Django 6 + DRF, Python 3.13.
-- **Blockchain**: `stellar-sdk` (Python) para Horizon (pagos, multisig) y
-  Soroban RPC (contrato del vault, Blend). Sin SDK oficial de Blend en
-  Python, así que las llamadas se arman a mano contra la spec pública del
-  contrato.
+- **Backend**: Django 6 + Django REST Framework, Python 3.13.
+- **Blockchain**: `stellar-sdk` (Python) contra **Horizon testnet**
+  (pagos, cuentas, multisig) y Soroban RPC testnet (contrato del vault,
+  Blend). Sin SDK oficial de Blend en Python, así que las llamadas se arman
+  a mano contra la spec pública del contrato.
 - **Contrato propio**: Soroban (Rust) para el vault de donaciones.
-- **Base de datos**: Postgres (Neon, serverless).
+- **Base de datos**: PostgreSQL sobre **Neon** (serverless), solo metadata
+  — el ledger de Stellar es la fuente de verdad de montos y estados.
 - **Frontend**: React + Vite + TypeScript, Freighter para firmar.
 - **Deploy**: Render (backend, plan free), gunicorn + whitenoise.
 
@@ -120,11 +128,27 @@ que la blockchain no tiene (notas, categorías, título del pool).
 
 ```bash
 cd backend_django
-cp .env.example .env   # completar DATABASE_URL (Postgres) y el resto
+cp .env.example .env   # completar las variables (detalle abajo)
 pip install -r requirements.txt
 python manage.py migrate
 python manage.py runserver
 ```
+
+Variables de entorno necesarias (`backend_django/.env`, ver
+`.env.example`):
+
+| Variable | Para qué |
+|---|---|
+| `DJANGO_SECRET_KEY` | clave de Django (cualquier string random en dev) |
+| `DJANGO_DEBUG` | `true` en local, `false` en producción |
+| `DJANGO_ALLOWED_HOSTS` | hosts permitidos (`localhost,127.0.0.1` en dev) |
+| `DATABASE_URL` | conexión a Postgres (Neon), formato `postgresql://...` |
+| `STELLAR_HORIZON_URL` | `https://horizon-testnet.stellar.org` |
+| `STELLAR_NETWORK_PASSPHRASE` | `Test SDF Network ; September 2015` |
+| `STELLAR_SOROBAN_RPC_URL` | `https://soroban-testnet.stellar.org` |
+| `BLEND_POOL_CONTRACT_ID` | contrato del pool de Blend en testnet |
+| `VAULT_CONTRACT_ID` | contrato propio del vault de donaciones |
+| `CORS_ALLOW_ALL_ORIGINS` | `true` en dev para que el frontend pegue libre |
 
 ```bash
 cd frontend
