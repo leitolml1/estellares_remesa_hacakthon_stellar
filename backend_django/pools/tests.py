@@ -403,7 +403,7 @@ class VaultLeaderboardViewTests(APITestCase):
     def setUp(self):
         self.client = APIClient()
         self.pool = Pool.objects.create(
-            short_code="leaderpool1",
+            short_code="leaderpool",
             wallet_address=WALLET,
             title="Pool con leaderboard",
             creator=CREATOR,
