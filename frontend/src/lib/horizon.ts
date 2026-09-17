@@ -12,6 +12,24 @@ import { TESTNET_NETWORK_PASSPHRASE } from './format'
 import type { AccountBalance, PaymentAsset } from '../types'
 
 export const HORIZON_URL = 'https://horizon-testnet.stellar.org'
+
+export type TrackedPaymentOp = {
+  from: string
+  to: string
+  amount: string
+  assetCode: string
+  assetIssuer?: string
+}
+
+export type TrackedTransaction = {
+  hash: string
+  status: 'pending' | 'success' | 'failed' | 'not_found'
+  ledger?: number
+  createdAt?: string
+  successful?: boolean
+  memo?: string
+  payments: TrackedPaymentOp[]
+}
 const TX_TIMEOUT_SECONDS = 180
 const MIN_CREATE_ACCOUNT_XLM = 1
 const FEE_MULTIPLIER = 20
@@ -92,7 +110,7 @@ export async function buildPaymentXdr(input: {
     )
     if (!trust.hasTrustline) {
       throw new Error(
-        `La cuenta destino no tiene trustline para ${destAsset.getCode()}.`,
+        `La cuenta destino no acepta ${destAsset.getCode()} todavía.`,
       )
     }
   }
@@ -206,7 +224,7 @@ export function signXdrWithSecret(xdr: string, secret: string): string {
     TESTNET_NETWORK_PASSPHRASE,
   )
   if (!('sign' in transaction)) {
-    throw new Error('El XDR no es una transacción simple.')
+    throw new Error('La transacción firmada no es válida.')
   }
   transaction.sign(Keypair.fromSecret(secret))
   return transaction.toXDR()
@@ -220,6 +238,67 @@ async function accountExists(publicKey: string): Promise<boolean> {
     if (error instanceof NotFoundError) return false
     const status = horizonStatus(error)
     if (status === 404) return false
+    throw mapHorizonError(error)
+  }
+}
+
+function assetCodeFromOperation(
+  operation: Horizon.ServerApi.PaymentOperationRecord,
+): { code: string; issuer?: string } {
+  if (operation.asset_type === 'native') return { code: 'XLM' }
+  return {
+    code: operation.asset_code ?? '—',
+    issuer: operation.asset_issuer,
+  }
+}
+
+export async function trackTransaction(txHash: string): Promise<TrackedTransaction> {
+  const cleanHash = txHash.trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(cleanHash)) {
+    throw new Error('El hash no parece un hash de transacción de Stellar (64 caracteres hex).')
+  }
+
+  try {
+    const tx = await server.transactions().transaction(cleanHash).call()
+    const payments = await server
+      .payments()
+      .forTransaction(cleanHash)
+      .limit(20)
+      .call()
+
+    return {
+      hash: tx.hash,
+      status: tx.successful ? 'success' : 'failed',
+      ledger: tx.ledger_attr,
+      createdAt: tx.created_at,
+      successful: tx.successful,
+      memo: tx.memo,
+      payments: payments.records
+        .filter(
+          (operation): operation is Horizon.ServerApi.PaymentOperationRecord =>
+            operation.type === 'payment' ||
+            operation.type === 'path_payment_strict_send' ||
+            operation.type === 'path_payment_strict_receive',
+        )
+        .map((operation) => {
+          const asset = assetCodeFromOperation(operation)
+          return {
+            from: operation.from,
+            to: operation.to,
+            amount: operation.amount,
+            assetCode: asset.code,
+            assetIssuer: asset.issuer,
+          }
+        }),
+    }
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      return { hash: cleanHash, status: 'not_found', payments: [] }
+    }
+    const status = horizonStatus(error)
+    if (status === 404) {
+      return { hash: cleanHash, status: 'not_found', payments: [] }
+    }
     throw mapHorizonError(error)
   }
 }
@@ -306,7 +385,7 @@ function messageForResultCodes(txCode?: string, opCode?: string): string | null 
     return 'La cuenta destino no existe en testnet. Pedile que la fondee con Friendbot, o enviá al menos 1 XLM para crearla.'
   }
   if (opCode === 'op_no_trust' || opCode === 'op_src_no_trust') {
-    return 'Falta una trustline para ese asset.'
+    return 'Falta activar ese activo en la cuenta.'
   }
   if (opCode === 'op_low_reserve') {
     return 'El saldo quedaría por debajo de la reserva mínima de Stellar.'
@@ -315,7 +394,7 @@ function messageForResultCodes(txCode?: string, opCode?: string): string | null 
     return 'El destino no puede recibir más de ese asset (línea llena).'
   }
   if (opCode === 'op_too_few_offers' || opCode === 'op_under_dest_min') {
-    return 'No hay camino de conversión para ese path payment. Probá enviar el mismo asset.'
+    return 'No hay camino de conversión para ese pago. Probá enviar el mismo activo.'
   }
   if (opCode === 'op_malformed' || txCode === 'tx_malformed') {
     return 'La transacción quedó mal armada. Revisá monto, destino y asset.'

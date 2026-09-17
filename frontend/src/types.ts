@@ -42,6 +42,7 @@ export type CommunityPool = {
   walletPublicKey: string
   title: string
   goalAmount?: string
+  deadline?: string
   creator: string
   vaultRegistered: boolean
   createdAt: string
@@ -89,7 +90,13 @@ export type CreatePoolRequest = {
   walletPublicKey: string
   title: string
   goalAmount?: string
+  deadline?: string
   creator: string
+}
+
+export type DonorEntry = {
+  publicKey: string
+  donatedXlmEquivalent: string
 }
 
 export type ApiError = {
@@ -150,4 +157,26 @@ export type TrustScoreBreakdown = {
   volume: number
   pools: number
   seniority: number
+}
+
+export type Contact = {
+  publicKey: string
+  alias: string
+  createdAt: string
+}
+
+export type RecurringFrequency = 'weekly' | 'biweekly' | 'monthly'
+
+export type RecurringTransfer = {
+  id: number
+  sender: string
+  receiver: string
+  amount: string
+  assetCode: string
+  frequency: RecurringFrequency
+  nextRunAt: string
+  lastPaidAt?: string | null
+  note?: string
+  active: boolean
+  createdAt: string
 }

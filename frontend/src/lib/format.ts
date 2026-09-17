@@ -15,12 +15,37 @@ export function truncateKey(value: string, edge = 4): string {
   return `${value.slice(0, edge)}…${value.slice(-edge)}`
 }
 
-export function formatAmount(value: string, asset = 'XLM'): string {
+export function formatAssetAmount(
+  value: string | number,
+  asset = '',
+  digits = 4,
+): string {
   const amount = Number(value)
-  if (!Number.isFinite(amount)) return `${value} ${asset}`
-  return `${amount.toLocaleString('es-AR', {
+  const suffix = asset.trim()
+  if (!Number.isFinite(amount)) {
+    return suffix ? `${value} ${suffix}` : String(value)
+  }
+  const formatted = amount.toLocaleString('es-AR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: digits,
+  })
+  return suffix ? `${formatted} ${suffix}` : formatted
+}
+
+export function formatAmount(value: string, asset = 'XLM'): string {
+  return formatAssetAmount(value, asset, 4)
+}
+
+export function fullAmountTitle(value: string | number, asset = 'XLM'): string {
+  const amount = Number(value)
+  const suffix = asset.trim()
+  if (!Number.isFinite(amount)) {
+    return suffix ? `${value} ${suffix}` : String(value)
+  }
+  const formatted = amount.toLocaleString('es-AR', {
     maximumFractionDigits: 7,
-  })} ${asset}`
+  })
+  return suffix ? `${formatted} ${suffix}` : formatted
 }
 
 export function formatDate(value: string): string {

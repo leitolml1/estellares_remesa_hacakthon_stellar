@@ -7,6 +7,8 @@ import type {
   PaymentRecord,
   PoolDetail,
   PoolWithPaymentUri,
+  RecurringFrequency,
+  RecurringTransfer,
   VaultState,
   WalletPower,
 } from '../types'
@@ -137,12 +139,139 @@ export async function getPaymentHistory(
   }
 }
 
+export type Quote = {
+  sendAsset: string
+  destAsset: string
+  sendAmount: string
+  destAmount: string
+  destMin: string
+  rate: string
+  source: 'direct' | 'dex' | 'reference'
+}
+
+export async function getQuote(
+  sendAsset: string,
+  destAsset: string,
+  amount: string,
+): Promise<Quote> {
+  const params = new URLSearchParams({
+    send_asset: sendAsset,
+    dest_asset: destAsset,
+    amount,
+  })
+  const raw = await request<{
+    send_asset: string
+    dest_asset: string
+    send_amount: string
+    dest_amount: string
+    dest_min: string
+    rate: string
+    source: Quote['source']
+  }>(`/api/payments/quote/?${params.toString()}`)
+  return {
+    sendAsset: raw.send_asset,
+    destAsset: raw.dest_asset,
+    sendAmount: raw.send_amount,
+    destAmount: raw.dest_amount,
+    destMin: raw.dest_min,
+    rate: raw.rate,
+    source: raw.source,
+  }
+}
+
+type DjangoRecurring = {
+  id: number
+  sender: string
+  receiver: string
+  amount: string
+  asset_code: string
+  frequency: RecurringFrequency
+  next_run_at: string
+  last_paid_at?: string | null
+  note?: string
+  active: boolean
+  created_at: string
+}
+
+function mapRule(rule: DjangoRecurring): RecurringTransfer {
+  return {
+    id: rule.id,
+    sender: rule.sender,
+    receiver: rule.receiver,
+    amount: rule.amount,
+    assetCode: rule.asset_code,
+    frequency: rule.frequency,
+    nextRunAt: rule.next_run_at,
+    lastPaidAt: rule.last_paid_at ?? undefined,
+    note: rule.note ?? undefined,
+    active: rule.active,
+    createdAt: rule.created_at,
+  }
+}
+
+export async function listRecurring(
+  publicKey: string,
+  query: { due?: boolean } = {},
+): Promise<RecurringTransfer[]> {
+  const params = new URLSearchParams({ public_key: publicKey })
+  if (query.due) params.set('due', 'true')
+  const payload = await request<{ records: DjangoRecurring[] }>(
+    `/api/payments/recurring/?${params.toString()}`,
+  )
+  return payload.records.map(mapRule)
+}
+
+export function createRecurring(body: {
+  sender: string
+  receiver: string
+  amount: string
+  assetCode: string
+  frequency: RecurringFrequency
+  note?: string
+  nextRunAt?: string
+}): Promise<RecurringTransfer> {
+  return request<RecurringTransfer>('/api/payments/recurring/', {
+    method: 'POST',
+    body: JSON.stringify({
+      sender: body.sender,
+      receiver: body.receiver,
+      amount: body.amount,
+      asset_code: body.assetCode,
+      frequency: body.frequency,
+      note: body.note || '',
+      next_run_at: body.nextRunAt || undefined,
+    }),
+  })
+}
+
+export function patchRecurring(
+  id: number,
+  body: { senderPublicKey: string; active?: boolean; paid?: boolean },
+): Promise<RecurringTransfer> {
+  return request<RecurringTransfer>(`/api/payments/recurring/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      sender_public_key: body.senderPublicKey,
+      active: body.active,
+      paid: body.paid,
+    }),
+  })
+}
+
+export function deleteRecurring(id: number, senderPublicKey: string): Promise<unknown> {
+  return request<unknown>(`/api/payments/recurring/${id}/`, {
+    method: 'DELETE',
+    body: JSON.stringify({ sender_public_key: senderPublicKey }),
+  })
+}
+
 type DjangoPool = {
   id: number
   short_code: string
   wallet_address: string
   title: string
   goal_amount?: string | null
+  deadline?: string | null
   creator: string
   vault_registered: boolean
   created_at: string
@@ -155,10 +284,26 @@ function mapPool(pool: DjangoPool) {
     walletPublicKey: pool.wallet_address,
     title: pool.title,
     goalAmount: pool.goal_amount ?? undefined,
+    deadline: pool.deadline ?? undefined,
     creator: pool.creator,
     vaultRegistered: pool.vault_registered,
     createdAt: pool.created_at,
   }
+}
+
+export type DonorEntry = {
+  publicKey: string
+  donatedXlmEquivalent: string
+}
+
+export async function getVaultLeaderboard(shortCode: string): Promise<DonorEntry[]> {
+  const payload = await request<{
+    donors: { public_key: string; donated_xlm_equivalent: string }[]
+  }>(`/api/pools/${shortCode}/vault/leaderboard/`)
+  return payload.donors.map((item) => ({
+    publicKey: item.public_key,
+    donatedXlmEquivalent: item.donated_xlm_equivalent,
+  }))
 }
 
 export async function createCommunityPool(
@@ -172,6 +317,7 @@ export async function createCommunityPool(
         wallet_address: body.walletPublicKey,
         title: body.title,
         goal_amount: body.goalAmount || null,
+        deadline: body.deadline || null,
         creator: body.creator,
       }),
     },

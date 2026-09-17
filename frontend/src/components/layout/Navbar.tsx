@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useWallet } from '../../context/WalletContext'
 import { truncateKey } from '../../lib/format'
+import { FreighterCta } from '../FreighterCta'
 import { StarMark } from './StarMark'
-import { StellarMark } from './StellarMark'
 
 const links = [
   { to: '/enviar', label: 'Enviar' },
@@ -13,28 +13,68 @@ const links = [
   { to: '/familia', label: 'Familia' },
 ]
 
+type OpenMenu = 'more' | 'wallet' | 'search' | null
+
 export function Navbar() {
-  const { publicKey, connecting, connect, disconnect } = useWallet()
-  const [menuOpen, setMenuOpen] = useState(false)
+  const { publicKey, disconnect } = useWallet()
+  const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
+  const [copied, setCopied] = useState(false)
+  const [poolQuery, setPoolQuery] = useState('')
+  const navRef = useRef<HTMLDivElement>(null)
+  const searchInput = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
   const location = useLocation()
 
   useEffect(() => {
-    setMenuOpen(false)
+    setOpenMenu(null)
   }, [location.pathname])
 
-  async function handleConnect() {
-    try {
-      await connect()
-    } catch {
-      // El error ya queda en el contexto para las pantallas.
+  useEffect(() => {
+    if (!openMenu) return
+    function onPointer(event: MouseEvent) {
+      if (navRef.current && !navRef.current.contains(event.target as Node)) {
+        setOpenMenu(null)
+      }
     }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpenMenu(null)
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [openMenu])
+
+  useEffect(() => {
+    if (openMenu === 'search') searchInput.current?.focus()
+  }, [openMenu])
+
+  function toggle(menu: OpenMenu) {
+    setOpenMenu((current) => (current === menu ? null : menu))
+  }
+
+  async function copyAddress() {
+    if (!publicKey) return
+    await navigator.clipboard.writeText(publicKey)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1600)
+  }
+
+  function goToPool(event: FormEvent) {
+    event.preventDefault()
+    const code = parsePoolRef(poolQuery)
+    if (!code) return
+    setPoolQuery('')
+    setOpenMenu(null)
+    navigate(`/pools/${code}`)
   }
 
   return (
     <header className="sticky top-0 z-30 px-3 pt-5 pb-4 sm:px-5 sm:pt-6 sm:pb-5">
-      <div className="site-nav mx-auto max-w-7xl">
-        <div className="relative z-10 flex items-center gap-3 px-3 py-2 sm:px-4">
+      <div className="site-nav mx-auto max-w-7xl" ref={navRef}>
+        <div className="relative z-10 flex items-center gap-2 px-3 py-1.5 sm:px-4">
           <NavLink to="/" className="flex shrink-0 items-center gap-2.5 pl-0.5">
             <StarMark />
             <span className="hidden leading-none sm:block">
@@ -47,18 +87,13 @@ export function Navbar() {
             </span>
           </NavLink>
 
-          <nav className="mx-auto hidden items-center gap-0.5 rounded-full bg-purple-soft/70 p-1 lg:flex">
+          <nav className="nav-links" aria-label="Principal">
             {links.map((link) => (
               <NavLink
                 key={link.to}
                 to={link.to}
                 className={({ isActive }) =>
-                  [
-                    'rounded-full px-3.5 py-1.5 text-sm transition',
-                    isActive
-                      ? 'bg-purple font-semibold text-white shadow-sm'
-                      : 'text-purple-deep/70 hover:bg-white/80 hover:text-purple-deep',
-                  ].join(' ')
+                  `nav-link ${isActive ? 'is-active' : ''}`
                 }
               >
                 {link.label}
@@ -66,122 +101,124 @@ export function Navbar() {
             ))}
           </nav>
 
-          <div className="ml-auto flex items-center gap-2">
-            <span className="hidden md:inline-flex">
-              <StellarMark
-                size={16}
-                tone="light"
-                className="rounded-full border border-purple/15 bg-white/60 px-2.5 py-1"
-              >
-                <span className="hidden text-[10px] font-semibold uppercase tracking-[0.16em] text-purple-deep/70 xl:inline">
-                  Powered by Stellar
-                </span>
-              </StellarMark>
-            </span>
-            <span className="hidden items-center gap-1.5 rounded-full border border-purple/15 bg-white/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-purple-deep/70 md:inline-flex">
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="nav-testnet">
               <span className="nav-pulse" />
               Testnet
             </span>
-            <button
-              type="button"
-              aria-label="Buscar pool"
-              onClick={() => navigate('/pools')}
-              className="grid h-10 w-10 place-items-center rounded-full border border-purple/15 bg-white/70 text-purple-deep hover:bg-white"
-            >
-              <SearchIcon />
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                aria-label="Ir a pool por short code"
+                aria-expanded={openMenu === 'search'}
+                onClick={() => toggle('search')}
+                className="nav-icon-btn"
+              >
+                <SearchIcon />
+              </button>
+              {openMenu === 'search' ? (
+                <form className="nav-popover is-search" onSubmit={goToPool}>
+                  <label className="nav-search-label" htmlFor="nav-pool-code">
+                    Ir a pool
+                  </label>
+                  <div className="nav-search-row">
+                    <input
+                      id="nav-pool-code"
+                      ref={searchInput}
+                      value={poolQuery}
+                      onChange={(event) => setPoolQuery(event.target.value)}
+                      placeholder="Short code o link"
+                      spellCheck={false}
+                    />
+                    <button type="submit">Abrir</button>
+                  </div>
+                </form>
+              ) : null}
+            </div>
             {publicKey ? (
-              <div className="hidden items-center gap-2 sm:flex">
+              <div className="relative">
                 <button
                   type="button"
-                  onClick={() => navigate('/perfil')}
-                  className="rounded-full border border-purple/15 bg-white/70 px-3 py-2 font-mono text-xs text-ink"
+                  className="nav-wallet"
+                  aria-expanded={openMenu === 'wallet'}
+                  aria-haspopup="menu"
+                  onClick={() => toggle('wallet')}
                 >
                   {truncateKey(publicKey, 5)}
                 </button>
-                <button
-                  type="button"
-                  onClick={disconnect}
-                  className="rounded-full px-3 py-2 text-sm text-purple-deep/70 hover:text-purple-deep"
-                >
-                  Salir
-                </button>
+                {openMenu === 'wallet' ? (
+                  <div className="nav-popover" role="menu">
+                    <button
+                      type="button"
+                      className="nav-popover-item"
+                      role="menuitem"
+                      onClick={() => void copyAddress()}
+                    >
+                      {copied ? 'Address copiada' : 'Copiar address'}
+                    </button>
+                    <button
+                      type="button"
+                      className="nav-popover-item"
+                      role="menuitem"
+                      onClick={() => {
+                        setOpenMenu(null)
+                        disconnect()
+                      }}
+                    >
+                      Salir
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ) : (
+              <FreighterCta compact />
+            )}
+            <div className="nav-more">
               <button
                 type="button"
-                className="hidden rounded-full bg-purple px-4 py-2 text-sm font-semibold text-white hover:bg-purple-deep sm:inline-flex"
-                onClick={() => void handleConnect()}
-                disabled={connecting}
+                className="nav-more-btn"
+                aria-expanded={openMenu === 'more'}
+                aria-haspopup="true"
+                onClick={() => toggle('more')}
               >
-                {connecting ? 'Conectando…' : 'Conectar Freighter'}
+                Más
               </button>
-            )}
-            <button
-              type="button"
-              className="grid h-10 w-10 place-items-center rounded-full border border-purple/20 text-ink lg:hidden"
-              onClick={() => setMenuOpen((open) => !open)}
-              aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'}
-              aria-expanded={menuOpen}
-            >
-              <span className="text-lg leading-none">{menuOpen ? '×' : '☰'}</span>
-            </button>
-          </div>
-        </div>
-
-        {menuOpen ? (
-          <div className="relative z-10 border-t border-purple/10 px-3 py-3 lg:hidden">
-            <div className="flex flex-col gap-1">
-              {links.map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  className={({ isActive }) =>
-                    [
-                      'rounded-2xl px-3 py-2.5 text-sm',
-                      isActive
-                        ? 'bg-purple font-semibold text-white'
-                        : 'text-purple-deep/80 hover:bg-purple-soft hover:text-purple-deep',
-                    ].join(' ')
-                  }
-                >
-                  {link.label}
-                </NavLink>
-              ))}
-              <NavLink
-                to="/perfil"
-                className="rounded-2xl px-3 py-2.5 text-sm text-purple-deep/80 hover:bg-purple-soft"
-              >
-                Perfil
-              </NavLink>
-              {publicKey ? (
-                <button
-                  type="button"
-                  className="rounded-2xl px-3 py-2.5 text-left text-sm text-purple-deep/50"
-                  onClick={disconnect}
-                >
-                  Desconectar {truncateKey(publicKey)}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="rounded-2xl bg-purple px-3 py-2.5 text-left text-sm font-semibold text-white"
-                  onClick={() => void handleConnect()}
-                >
-                  Conectar Freighter
-                </button>
-              )}
+              {openMenu === 'more' ? (
+                <div className="nav-popover">
+                  {links.map((link) => (
+                    <NavLink
+                      key={link.to}
+                      to={link.to}
+                      className={({ isActive }) =>
+                        `nav-popover-item ${isActive ? 'is-active' : ''}`
+                      }
+                    >
+                      {link.label}
+                    </NavLink>
+                  ))}
+                  <NavLink to="/perfil" className="nav-popover-item">
+                    Perfil
+                  </NavLink>
+                </div>
+              ) : null}
             </div>
           </div>
-        ) : null}
+        </div>
       </div>
     </header>
   )
 }
 
+function parsePoolRef(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const match = trimmed.match(/\/pools\/([^/?#]+)/)
+  return match?.[1] ?? trimmed
+}
+
 function SearchIcon() {
   return (
-    <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" aria-hidden="true">
+    <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
       <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.8" />
       <path
         d="m13.5 13.5 3 3"

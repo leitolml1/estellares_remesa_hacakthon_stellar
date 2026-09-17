@@ -259,6 +259,30 @@ def submit_vault_tx(signed_xdr: str) -> dict:
     )
 
 
+def get_vault_leaderboard(short_code: str) -> list[dict]:
+    """Leaderboard del pool leido directo del contrato: (donante, XLM
+    equivalente acumulado), ordenado de mayor a menor aporte. Nunca baja
+    al retirar. Los montos vuelven como strings en unidades XLM, igual que
+    el resto de la API de pools."""
+    client = _client()
+    try:
+        result = client.invoke("donors", parameters=[scval.to_string(short_code)]).result()
+    except (ConnectionError, BaseHorizonError) as exc:
+        raise VaultUnavailableError(str(exc)) from exc
+
+    native = scval.to_native(result)
+    donors = []
+    for entry in native:
+        donor, equivalent = entry[0], entry[1]
+        donors.append(
+            {
+                "public_key": donor.address if hasattr(donor, "address") else str(donor),
+                "donated_xlm_equivalent": scaled_to_amount(int(equivalent)),
+            }
+        )
+    return donors
+
+
 def get_vault_state(short_code: str) -> dict:
     """Estado on-chain del pool en el vault (fuente de verdad). Devuelve
     registered: False si el pool no esta registrado (o el contrato no

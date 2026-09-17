@@ -34,11 +34,16 @@ export function Footer() {
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-yellow">
               Red
             </h3>
-            <StellarMark variant="wordmark" size={20} tone="dark" className="mb-3" />
+            <div className="mb-3 flex flex-col gap-1.5">
+              <StellarMark variant="wordmark" size={20} tone="dark" />
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/50">
+                Powered by Stellar
+              </span>
+            </div>
             <div className="flex flex-col gap-2 text-sm text-white/70">
               <span>Horizon testnet</span>
               <span>Freighter wallet</span>
-              <span>SEP-7 QR</span>
+              <span>Pago con QR</span>
             </div>
           </div>
           <div>

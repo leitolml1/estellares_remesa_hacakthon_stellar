@@ -13,7 +13,7 @@ export function PageStage({
   className = '',
   children,
 }: {
-  kicker: string
+  kicker?: string
   title: string
   subtitle?: string
   lead?: ReactNode
@@ -61,7 +61,7 @@ export function PageStage({
           .join(' ')}
       >
         <header className="page-stage-head">
-          <p className="anim-enter page-stage-kicker">{kicker}</p>
+          {kicker ? <p className="anim-enter page-stage-kicker">{kicker}</p> : null}
           <h1 className="anim-enter page-stage-title">{title}</h1>
           {subtitle ? (
             <p className="anim-enter page-stage-subtitle">{subtitle}</p>

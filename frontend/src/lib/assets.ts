@@ -92,6 +92,21 @@ export function knownAssetBalance(
   )
 }
 
+// Equivalencias referenciales asset -> XLM, espejo de las tasas que usa
+// el backend (stellar_common/assets.py) y el vault Soroban (constructor).
+// Sirven para agregaciones client-side, ej. el leaderboard de pools clasicos.
+export const XLM_REFERENCE_RATES: Partial<Record<KnownAssetCode, number>> = {
+  USDC: 10,
+  EURC: 11,
+}
+
+export function xlmEquivalent(amount: string, code: string): number {
+  const parsed = Number(amount)
+  if (!Number.isFinite(parsed)) return 0
+  const rate = code === 'XLM' ? 1 : XLM_REFERENCE_RATES[code as KnownAssetCode]
+  return rate ? parsed * rate : 0
+}
+
 export function buildPayUri(input: {
   destination: string
   memo?: string

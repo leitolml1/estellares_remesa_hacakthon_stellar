@@ -14,7 +14,7 @@ export function Field({
   children: ReactNode
 }) {
   return (
-    <div className="block space-y-2.5">
+    <div className="block space-y-1.5">
       <span className="form-label">{label}</span>
       {children}
       {hint && !error ? <span className="form-hint">{hint}</span> : null}

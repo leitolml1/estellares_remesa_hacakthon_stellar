@@ -24,6 +24,8 @@ export function DashHero({
   remain,
   percent,
   progress,
+  valueTitle,
+  compact = false,
 }: {
   kicker: string
   value: string
@@ -34,17 +36,21 @@ export function DashHero({
   remain?: string
   percent?: string
   progress?: number
+  valueTitle?: string
+  compact?: boolean
 }) {
   const width =
     progress == null ? null : Math.max(0, Math.min(100, progress))
   return (
-    <div className="dash-hero">
+    <div className={`dash-hero ${compact ? 'is-compact' : ''}`}>
       <div className="dash-hero-head">
         <p className="dash-hero-kicker">{kicker}</p>
         {remain ? <p className="dash-hero-remain">{remain}</p> : null}
       </div>
       <div className="dash-hero-value-row">
-        <p className="dash-hero-value">{value}</p>
+        <p className="dash-hero-value" title={valueTitle}>
+          {value}
+        </p>
         {percent ? <p className="dash-hero-pct">{percent}</p> : null}
       </div>
       {fiat ? <p className="dash-hero-fiat">{fiat}</p> : null}
@@ -110,17 +116,19 @@ export function DashFeedItem({
   amount,
   code,
   href,
+  fromLabel = 'Desde',
 }: {
   from: string
   date?: string
   amount: string
   code?: string
   href?: string
+  fromLabel?: string
 }) {
   return (
     <div className="dash-feed-item">
       <div>
-        <p className="dash-feed-from">Desde</p>
+        <p className="dash-feed-from">{fromLabel}</p>
         <p className="dash-feed-key">{from}</p>
         {date ? <p className="dash-feed-date">{date}</p> : null}
       </div>

@@ -197,5 +197,5 @@ BLEND_POOL_CONTRACT_ID = os.environ.get(
 # vive en vault_contract/ de la raiz del repo. Un solo contrato compartido
 # por todos los pools; el ID cambia con cada deploy (ver .env.example).
 VAULT_CONTRACT_ID = os.environ.get(
-    "VAULT_CONTRACT_ID", "CATQKYDF53TJDHK5WHXAXUAKV4GMPDLIJY5BB3PCUHE5RO467JDVILJK"
+    "VAULT_CONTRACT_ID", "CCIXECDJABDC3Y6TBDBTTR4I773AFONQVMJZZRUE4ZRV6DRDVEFWA4OH"
 )

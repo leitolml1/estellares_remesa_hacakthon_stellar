@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { PageStage } from '../components/layout/PageStage'
 import { Alert } from '../components/ui/Alert'
 import { AcceptedAssets } from '../components/ui/AssetLogo'
@@ -22,9 +22,8 @@ export function PoolsHomePage() {
   return (
     <PageStage
       layout="dashboard"
-      kicker="Módulo 2"
       title="POOLS"
-      subtitle="Tu listado es privado. Los donantes abren el link o el short code y donan con XLM, USDC o EURC."
+      subtitle="Tu listado es privado. Compartí el link o el código para que cualquiera aporte, sin registrarse."
     >
       <PoolsDashboard />
     </PageStage>
@@ -34,6 +33,7 @@ export function PoolsHomePage() {
 function PoolsDashboard() {
   const { publicKey } = useWallet()
   const navigate = useNavigate()
+  const location = useLocation()
   const [code, setCode] = useState('')
   const [pools, setPools] = useState<CommunityPool[]>([])
   const [loading, setLoading] = useState(Boolean(publicKey))
@@ -73,6 +73,11 @@ function PoolsDashboard() {
     }
   }, [publicKey])
 
+  useEffect(() => {
+    if (location.hash !== '#abrir-pool') return
+    document.getElementById('abrir-pool')?.focus()
+  }, [location.hash])
+
   return (
     <DashBoard>
       <DashCol>
@@ -107,11 +112,12 @@ function PoolsDashboard() {
             }}
           >
             <div className="min-w-0 flex-1">
-              <Field label="Short code o URL">
+              <Field label="Código o link del pool">
                 <TextInput
+                  id="abrir-pool"
                   value={code}
                   onChange={(event) => setCode(event.target.value)}
-                  placeholder="V1StGXR8_Z"
+                  placeholder="Código o link del pool"
                 />
               </Field>
             </div>

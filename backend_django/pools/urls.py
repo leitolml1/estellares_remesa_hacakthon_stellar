@@ -5,6 +5,7 @@ from .views import (
     PoolDetailView,
     PoolDonationsView,
     VaultDepositBuildView,
+    VaultLeaderboardView,
     VaultRegisterBuildView,
     VaultStateView,
     VaultSubmitView,
@@ -43,5 +44,10 @@ urlpatterns = [
         "<str:short_code>/vault/state/",
         VaultStateView.as_view(),
         name="pool-vault-state",
+    ),
+    path(
+        "<str:short_code>/vault/leaderboard/",
+        VaultLeaderboardView.as_view(),
+        name="pool-vault-leaderboard",
     ),
 ]

@@ -22,6 +22,10 @@ class Pool(models.Model):
     wallet_address = models.CharField(max_length=STELLAR_PUBLIC_KEY_LENGTH)
     title = models.CharField(max_length=140)
     goal_amount = models.CharField(max_length=32, blank=True, null=True)
+    # Fecha limite opcional para donar. Puramente informativa (las reglas
+    # de cierre viven on-chain en el vault); la usa el frontend para el
+    # countdown y para marcar la colecta como cerrada visualmente.
+    deadline = models.DateTimeField(blank=True, null=True)
     creator = models.CharField(max_length=STELLAR_PUBLIC_KEY_LENGTH)
 
     # Cache incremental del progreso de donaciones: no es una fuente de

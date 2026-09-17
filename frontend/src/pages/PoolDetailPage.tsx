@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
+import { FreighterCta } from '../components/FreighterCta'
 import { PageStage } from '../components/layout/PageStage'
 import { Alert } from '../components/ui/Alert'
 import { AssetChips, AssetLogo } from '../components/ui/AssetLogo'
@@ -13,6 +14,7 @@ import {
 } from '../components/ui/Dash'
 import { Field, TextInput } from '../components/ui/Field'
 import { Spinner } from '../components/ui/Spinner'
+import { TxStepper } from '../components/ui/TxStepper'
 import { useWallet } from '../context/WalletContext'
 import { useUnfoldDown } from '../hooks/useUnfoldDown'
 import {
@@ -20,17 +22,18 @@ import {
   buildVaultWithdraw,
   getCommunityPool,
   getPoolDonations,
+  getVaultLeaderboard,
   getVaultState,
   humanizeApiError,
   submitVaultTx,
 } from '../lib/api'
 import {
-  buildPayUri,
   displayAssetCode,
   getKnownAsset,
   KNOWN_ASSETS,
   knownAssetBalance,
   toPaymentAsset,
+  xlmEquivalent,
   type KnownAssetCode,
 } from '../lib/assets'
 import {
@@ -38,6 +41,7 @@ import {
   explorerTxUrl,
   formatAmount,
   formatDate,
+  fullAmountTitle,
   isStellarAmount,
   isStellarPublicKey,
   truncateKey,
@@ -49,30 +53,36 @@ import {
   checkTrustline,
   submitSignedXdr,
 } from '../lib/horizon'
-import type { PaymentRecord, PoolDetail, VaultState } from '../types'
+import type { DonorEntry, PaymentRecord, PoolDetail, VaultState } from '../types'
 
 export function PoolDetailPage() {
+  const [head, setHead] = useState({ title: 'Pool', kicker: '' })
   return (
     <PageStage
       layout="dashboard"
-      kicker="Módulo 2"
-      title="POOL"
-      subtitle="Compartí el link o el short code: cualquiera puede ver el pool y donar, sin estar registrado."
+      kicker={head.kicker || undefined}
+      title={head.title}
+      subtitle="Cualquiera puede aportar con el link, sin registrarse."
     >
-      <PoolDetailContent />
+      <PoolDetailContent onHead={setHead} />
     </PageStage>
   )
 }
 
-function PoolDetailContent() {
+function PoolDetailContent({
+  onHead,
+}: {
+  onHead: (head: { title: string; kicker: string }) => void
+}) {
   const { shortCode = '' } = useParams()
-  const { publicKey, connecting, connect, balances, refreshBalances } = useWallet()
+  const { publicKey, balances, refreshBalances } = useWallet()
   const [detail, setDetail] = useState<PoolDetail | null>(null)
   const [amount, setAmount] = useState('')
   const [assetCode, setAssetCode] = useState<KnownAssetCode>('XLM')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<'link' | 'code' | null>(null)
+  const [retryToken, setRetryToken] = useState(0)
   const [hasTrustline, setHasTrustline] = useState<boolean | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
@@ -81,9 +91,17 @@ function PoolDetailContent() {
   const [vaultBusy, setVaultBusy] = useState<string | null>(null)
   const [vaultError, setVaultError] = useState<string | null>(null)
   const [vaultOk, setVaultOk] = useState<string | null>(null)
-  const [withdrawAssetCode, setWithdrawAssetCode] = useState<KnownAssetCode>('XLM')
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawDestination, setWithdrawDestination] = useState('')
+  const [actionTab, setActionTab] = useState<'donate' | 'withdraw' | 'share'>('donate')
+  const [donationStatus, setDonationStatus] = useState<
+    'idle' | 'building' | 'signing' | 'submitting' | 'ok'
+  >('idle')
+  const [donationHash, setDonationHash] = useState<string | null>(null)
+  const [leaderboard, setLeaderboard] = useState<DonorEntry[] | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+
+  const POLL_INTERVAL_MS = 15000
 
   // Los paneles (.unfold-down / .stage-card) nacen con opacity: 0 en el CSS
   // y solo los revela este hook. Como el detalle se monta DESPUES del fetch,
@@ -96,16 +114,21 @@ function PoolDetailContent() {
 
   useEffect(() => {
     let cancelled = false
+    const timeoutId = window.setTimeout(() => {
+      if (!cancelled) {
+        setError('No pudimos cargar el pool')
+        setLoading(false)
+      }
+    }, 12000)
     async function load() {
       setLoading(true)
       setError(null)
       try {
         const next = await getCommunityPool(shortCode)
-        if (!cancelled) setDetail(next)
-        // El feed de donaciones lo arma el backend: solo pagos ENTRANTES
-        // con el memo del pool (mismo criterio que el conteo de progreso).
-        // No se usa el historial completo de la wallet, que traeria gastos
-        // y pagos que no corresponden al pool.
+        if (cancelled) return
+        window.clearTimeout(timeoutId)
+        setDetail(next)
+        onHead({ title: next.pool.title, kicker: next.pool.shortCode })
         try {
           const records = await getPoolDonations(shortCode, 20)
           if (!cancelled) setDonations(records)
@@ -124,27 +147,65 @@ function PoolDetailContent() {
     void load()
     return () => {
       cancelled = true
+      window.clearTimeout(timeoutId)
     }
-  }, [shortCode])
+  }, [shortCode, retryToken, onHead])
+
+  // Refresh silencioso cada 15s: progreso del pool (que se re-sincroniza
+  // contra Horizon en el backend), donaciones, estado del vault y
+  // leaderboard. No toca flags de loading: es progreso "en vivo".
+  const poolRegisteredForPoll = detail?.pool.vaultRegistered ?? false
+  useEffect(() => {
+    let cancelled = false
+    async function refreshSilently() {
+      try {
+        const next = await getCommunityPool(shortCode)
+        if (cancelled) return
+        setDetail(next)
+      } catch {
+        // El refresh en vivo es best-effort: si falla, queda lo ultimo.
+      }
+      try {
+        const records = await getPoolDonations(shortCode, 20)
+        if (cancelled) return
+        setDonations(records)
+      } catch {
+        // idem
+      }
+      if (poolRegisteredForPoll) {
+        try {
+          const next = await getVaultLeaderboard(shortCode)
+          if (!cancelled) setLeaderboard(next)
+        } catch {
+          // sin leaderboard, sigue el fallback clasico
+        }
+        try {
+          const state = await getVaultState(shortCode)
+          if (!cancelled) setVault(state)
+        } catch {
+          // idem: el estado previo queda en pantalla
+        }
+      }
+    }
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshSilently()
+    }, POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [shortCode, poolRegisteredForPoll])
+
+  // Tick lento para el countdown del deadline.
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const pool = detail?.pool
   const poolRegistered = pool?.vaultRegistered ?? false
   const selectedAsset = getKnownAsset(assetCode)
   const suggestedAmount = amount.trim() && isStellarAmount(amount) ? amount.trim() : undefined
-  const paymentUri = useMemo(() => {
-    if (!pool || !selectedAsset) return ''
-    if (pool.vaultRegistered) {
-      // QR deep link: SEP-7 no puede invocar el contrato Soroban - el
-      // donante escanea, abre esta pagina y deposita al vault con Freighter.
-      return `${window.location.origin}/pools/${pool.shortCode}`
-    }
-    return buildPayUri({
-      destination: pool.walletPublicKey,
-      memo: pool.shortCode,
-      amount: suggestedAmount,
-      asset: selectedAsset,
-    })
-  }, [pool, selectedAsset, suggestedAmount])
 
   async function refreshVaultData() {
     try {
@@ -152,10 +213,16 @@ function PoolDetailContent() {
     } catch {
       setVault(null)
     }
+    try {
+      setLeaderboard(await getVaultLeaderboard(shortCode))
+    } catch {
+      setLeaderboard(null)
+    }
   }
 
   useEffect(() => {
     if (!poolRegistered) {
+      setLeaderboard(null)
       setVault(null)
       return
     }
@@ -166,6 +233,13 @@ function PoolDetailContent() {
       })
       .catch(() => {
         if (!cancelled) setVault(null)
+      })
+    getVaultLeaderboard(shortCode)
+      .then((donors) => {
+        if (!cancelled) setLeaderboard(donors)
+      })
+      .catch(() => {
+        if (!cancelled) setLeaderboard(null)
       })
     return () => {
       cancelled = true
@@ -196,16 +270,10 @@ function PoolDetailContent() {
     }
   }, [pool, assetCode])
 
-  // Para pools migrados al vault, la fuente de verdad es el contrato: la
-  // meta cumplida y el equivalente recaudado se leen de ahi, no de la sync
-  // de Horizon (que para estos pools ya no ve los depositos nuevos).
-  const completed = poolRegistered
-    ? (vault?.complete ?? false)
-    : (detail?.progress.completed ?? false)
+  // Fuente de verdad pública: progress + completed de la API.
+  // No usar goal_amount como recaudado ni vault.complete para el estado.
+  const completed = detail?.progress.completed === true
   const xlmRaised = useMemo(() => {
-    if (poolRegistered && vault?.equivalentTotal != null) {
-      return Number(vault.equivalentTotal)
-    }
     if (detail?.progress.xlmEquivalentTotal != null) {
       return Number(detail.progress.xlmEquivalentTotal)
     }
@@ -213,25 +281,55 @@ function PoolDetailContent() {
       (item) => item.assetCode === 'XLM' || item.assetCode === 'native',
     )
     return Number(xlm?.total ?? 0)
-  }, [detail, poolRegistered, vault])
+  }, [detail])
   const goal = pool?.goalAmount ? Number(pool.goalAmount) : 0
   const remaining = goal > 0 ? Math.max(0, goal - xlmRaised) : 0
-  const progress = goal > 0 ? (xlmRaised / goal) * 100 : 0
-  const remainLabel = completed
-    ? 'Meta cumplida'
+  const progress = completed
+    ? 100
     : goal > 0
-      ? `Faltan ${formatAmount(String(remaining), 'XLM')} para completar meta`
-      : undefined
+      ? Math.min(99.9, Math.max(0, (xlmRaised / goal) * 100))
+      : 0
+  const empty =
+    !completed &&
+    xlmRaised <= 0 &&
+    (detail?.progress.donationCount ?? 0) === 0 &&
+    donations.length === 0
+  // Deadline informativo: las reglas de cierre reales viven on-chain.
+  let deadlineLabel: string | undefined
+  if (pool?.deadline && !completed) {
+    const deadlineMs = new Date(pool.deadline).getTime()
+    if (!Number.isNaN(deadlineMs)) {
+      const diffMs = deadlineMs - now
+      const days = Math.floor(Math.abs(diffMs) / 86_400_000)
+      const hours = Math.floor((Math.abs(diffMs) % 86_400_000) / 3_600_000)
+      deadlineLabel =
+        diffMs <= 0
+          ? `Cerrada hace ${days > 0 ? `${days}d ` : ''}${hours}h`
+          : days > 0
+            ? `Cerrada en ${days}d ${hours}h`
+            : `Cerrada en ${hours}h`
+    }
+  }
+  const remainLabel = [
+    completed
+      ? 'Meta cumplida'
+      : goal > 0
+        ? `Faltan ${formatAmount(String(remaining), 'XLM')} para completar meta`
+        : undefined,
+    deadlineLabel,
+  ]
+    .filter(Boolean)
+    .join(' · ') || undefined
   const availableAssets = KNOWN_ASSETS.map((asset) => {
     const fromVault = vault?.assets.find((item) => item.assetCode === asset.code)
-    if (fromVault) {
+    if (fromVault && Number(fromVault.available) > 0) {
       return { code: asset.code, amount: fromVault.available }
     }
     const fromProgress = detail?.progress.totalByAsset.find(
       (item) => displayAssetCode(item.assetCode) === asset.code,
     )
     return { code: asset.code, amount: fromProgress?.total ?? '0' }
-  })
+  }).filter((item) => Number(item.amount) > 0)
   const canOpenTrustline = Boolean(
     publicKey && pool && publicKey === pool.walletPublicKey && selectedAsset?.issuer,
   )
@@ -240,14 +338,42 @@ function PoolDetailContent() {
     publicKey && pool && (publicKey === pool.creator || publicKey === pool.walletPublicKey),
   )
 
-  async function shareUri() {
-    if (navigator.share) {
-      await navigator.share({ title: pool?.title, url: paymentUri })
-      return
+  // Leaderboard: on-chain para pools vault, agregado client-side (sobre los
+  // ultimos aportes) para los clasicos.
+  const topDonors = useMemo(() => {
+    if (poolRegistered && leaderboard && leaderboard.length > 0) {
+      return leaderboard
+        .slice(0, 5)
+        .map((entry) => ({
+          key: entry.publicKey,
+          label: '≈' + formatAmount(entry.donatedXlmEquivalent, 'XLM'),
+        }))
     }
-    await navigator.clipboard.writeText(paymentUri)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1600)
+    const totals = new Map<string, number>()
+    for (const donation of donations) {
+      const code = displayAssetCode(donation.assetCode)
+      const current = totals.get(donation.from) ?? 0
+      totals.set(donation.from, current + xlmEquivalent(donation.amount, code))
+    }
+    return [...totals.entries()]
+      .filter(([, total]) => total > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([key, total]) => ({
+        key,
+        label: '≈' + formatAmount(String(total), 'XLM'),
+      }))
+  }, [poolRegistered, leaderboard, donations])
+
+  async function copyShare(kind: 'link' | 'code') {
+    if (!pool) return
+    const value =
+      kind === 'code'
+        ? pool.shortCode
+        : `${window.location.origin}/pools/${pool.shortCode}`
+    await navigator.clipboard.writeText(value)
+    setCopied(kind)
+    window.setTimeout(() => setCopied(null), 1600)
   }
 
   async function openTrustline() {
@@ -255,7 +381,7 @@ function PoolDetailContent() {
     try {
       setError(null)
       setOk(null)
-      setBusy(`Abriendo trustline ${selectedAsset.code}…`)
+      setBusy(`Activando ${selectedAsset.code}…`)
       const { xdr } = await buildChangeTrustXdr({
         sourcePublicKey: publicKey,
         asset: toPaymentAsset(selectedAsset),
@@ -288,31 +414,37 @@ function PoolDetailContent() {
     try {
       setError(null)
       setOk(null)
+      setDonationStatus('building')
+      setDonationHash(null)
 
       if (pool.vaultRegistered) {
         // Deposito al vault: Django arma la invocacion al contrato, la
         // firma el donante con Freighter y el contrato mueve los tokens.
         if (selectedAsset.issuer && knownAssetBalance(balances?.balances, selectedAsset) == null) {
           setError(
-            `Tu wallet no tiene ${selectedAsset.code}: abrí la trustline y conseguí balance antes de donar.`,
+            `Tu wallet no tiene ${selectedAsset.code}: activá el activo y conseguí saldo antes de donar.`,
           )
           return
         }
-        setBusy('Armando depósito al vault…')
+        setBusy('Armando el depósito…')
         const { xdr } = await buildVaultDeposit(shortCode, {
           donor_public_key: publicKey,
           asset_code: selectedAsset.code,
           amount: suggestedAmount,
         })
-        setBusy('Firmá el depósito en Freighter…')
+        setBusy('Firmá el depósito en tu billetera…')
+        setDonationStatus('signing')
         const signed = await signTransactionWithFreighter(
           xdr,
           TESTNET_NETWORK_PASSPHRASE,
           publicKey,
         )
         setBusy('Enviando a Soroban…')
+        setDonationStatus('submitting')
         const result = await submitVaultTx(shortCode, signed.signedXdr)
-        setOk(`Depósito al vault confirmado. ${truncateKey(result.hash, 4)}`)
+        setDonationStatus('ok')
+        setDonationHash(result.hash)
+        setOk(`Depósito confirmado. ${truncateKey(result.hash, 4)}`)
         const next = await getCommunityPool(shortCode)
         setDetail(next)
         void refreshVaultData()
@@ -332,19 +464,25 @@ function PoolDetailContent() {
         destMin: suggestedAmount,
         memo: pool.shortCode,
       })
-      setBusy('Firmá el depósito en Freighter…')
+      setBusy('Firmá el depósito en tu billetera…')
+      setDonationStatus('signing')
       const signed = await signTransactionWithFreighter(
         xdr,
         TESTNET_NETWORK_PASSPHRASE,
         publicKey,
       )
       setBusy('Enviando a Horizon…')
+      setDonationStatus('submitting')
       const result = await submitSignedXdr(signed.signedXdr)
+      setDonationStatus('ok')
+      setDonationHash(result.hash)
       setOk(`Depósito confirmado. ${truncateKey(result.hash, 4)}`)
       const next = await getCommunityPool(shortCode)
       setDetail(next)
     } catch (caught) {
       setError(humanizeFlowError(caught))
+      setDonationStatus('idle')
+      setDonationHash(null)
     } finally {
       setBusy(null)
     }
@@ -361,9 +499,9 @@ function PoolDetailContent() {
       setVaultError('Ingresá un monto válido para retirar.')
       return
     }
-    const available = vault?.assets.find((item) => item.assetCode === withdrawAssetCode)?.available
+    const available = vault?.assets.find((item) => item.assetCode === assetCode)?.available
     if (available != null && Number(withdrawAmount) > Number(available)) {
-      setVaultError(`El vault tiene ${formatAmount(available, '')} ${withdrawAssetCode} disponible.`)
+      setVaultError(`Hay ${formatAmount(available, assetCode)} disponible.`)
       return
     }
     try {
@@ -372,7 +510,7 @@ function PoolDetailContent() {
       setVaultBusy('Armando el retiro…')
       const { xdr } = await buildVaultWithdraw(shortCode, {
         owner_public_key: publicKey,
-        asset_code: withdrawAssetCode,
+        asset_code: assetCode,
         destination_public_key: destination,
         amount: withdrawAmount.trim(),
       })
@@ -396,43 +534,84 @@ function PoolDetailContent() {
   }
 
   if (loading) {
-    return <Spinner label="Cargando pool…" />
+    return (
+      <div className="dash-board">
+        <div className="dash-hero animate-pulse">
+          <p className="dash-hero-kicker">Cargando</p>
+          <p className="dash-hero-value">—</p>
+        </div>
+        <DashCard title="Pool" hint="Estamos trayendo el progreso y los aportes.">
+          <p className="dash-empty">Un segundo…</p>
+        </DashCard>
+      </div>
+    )
   }
 
   if (error || !detail || !pool) {
-    return <Alert tone="error">{error ?? 'No encontramos ese pool.'}</Alert>
+    return (
+      <div className="space-y-3">
+        <Alert tone="error">{error ?? 'No encontramos ese pool.'}</Alert>
+        <Button variant="ghost" onClick={() => setRetryToken((n) => n + 1)}>
+          Reintentar
+        </Button>
+      </div>
+    )
   }
+
+  const shareBar = (
+    <div className="flex flex-wrap gap-2">
+      <Button variant="white" onClick={() => void copyShare('link')}>
+        {copied === 'link' ? 'Link copiado' : 'Copiar link'}
+      </Button>
+      <Button variant="white" onClick={() => void copyShare('code')}>
+        {copied === 'code' ? 'Código copiado' : 'Copiar código'}
+      </Button>
+    </div>
+  )
+  const tabs = [
+    ...(!completed ? [{ id: 'donate' as const, label: 'Aportar' }] : []),
+    ...(pool.vaultRegistered && youArePoolWallet
+      ? [{ id: 'withdraw' as const, label: 'Retirar' }]
+      : []),
+    { id: 'share' as const, label: 'Compartir' },
+  ]
+  const activeTab = tabs.some((tab) => tab.id === actionTab)
+    ? actionTab
+    : completed
+      ? 'share'
+      : tabs[0].id
 
   return (
     <div ref={reveal}>
       <DashBoard>
         <DashCol>
           <DashHero
-            kicker="Recaudado"
+            compact
+            kicker={completed ? 'Meta cumplida' : 'Recaudado'}
             remain={remainLabel}
             value={formatAmount(String(xlmRaised), 'XLM')}
+            valueTitle={fullAmountTitle(xlmRaised, 'XLM')}
             percent={goal > 0 ? `${Math.round(progress)}%` : undefined}
             progress={goal > 0 ? progress : undefined}
-            extraLabel="También en el pool"
-            extra={availableAssets.map((item) => (
-              <span key={item.code} className="dash-hero-asset">
-                <AssetLogo code={item.code} className="h-5 w-5" />
-                <span>{formatAmount(item.amount, item.code)}</span>
-              </span>
-            ))}
+            extraLabel={availableAssets.length > 0 ? 'También en el pool' : undefined}
+            extra={
+              availableAssets.length > 0
+                ? availableAssets.map((item) => (
+                    <span key={item.code} className="dash-hero-asset">
+                      <AssetLogo code={item.code} className="h-5 w-5" />
+                      <span>{formatAmount(item.amount, item.code)}</span>
+                    </span>
+                  ))
+                : undefined
+            }
           />
-        </DashCol>
-        <DashCol feed>
-          <DashCard
-            title="Donaciones recibidas"
-            hint="Pagos con el memo del pool."
-          >
+          <DashCard title="Aportes">
             {donations.length === 0 ? (
               <p className="dash-empty">
-                Todavía no hay donaciones con el memo {pool.shortCode}.
+                {empty ? 'Todavía no hay aportes.' : 'Todavía no hay movimientos para mostrar.'}
               </p>
             ) : (
-              <div className="dash-feed">
+              <div id="movimientos" className="dash-feed">
                 {donations.map((item) => (
                   <DashFeedItem
                     key={item.id}
@@ -446,55 +625,103 @@ function PoolDetailContent() {
               </div>
             )}
           </DashCard>
+          {topDonors.length > 0 ? (
+            <DashCard
+              title="Top donantes"
+              hint={
+                poolRegistered
+                  ? 'Aportes acumulados en XLM equivalente, leidos on-chain del vault.'
+                  : 'Agregado sobre los últimos aportes entrantes, en XLM equivalente.'
+              }
+            >
+              <div className="dash-feed">
+                {topDonors.map((donor, index) => (
+                  <DashFeedItem
+                    key={`${donor.key}-${index}`}
+                    fromLabel={`Puesto ${index + 1}`}
+                    from={truncateKey(donor.key, 4)}
+                    amount={donor.label}
+                  />
+                ))}
+              </div>
+            </DashCard>
+          ) : null}
+        </DashCol>
+        <DashCol>
           <DashCard
-            title="Donar"
+            title={
+              activeTab === 'withdraw'
+                ? 'Retirar'
+                : activeTab === 'share'
+                  ? 'Compartir'
+                  : completed
+                    ? 'Cerrado'
+                    : 'Aportar'
+            }
             hint={
-              completed
-                ? 'Este pool ya no recibe donaciones.'
-                : 'Elegí el asset y el monto. Freighter firma el depósito.'
+              activeTab === 'withdraw'
+                ? 'Retirá al momento, firmando con la wallet del pool.'
+                : activeTab === 'share'
+                  ? 'Cualquiera aporta con el link, sin registrarse.'
+                  : 'Elegí el activo y el monto. Tu billetera firma el depósito.'
             }
           >
-            <div className="mt-4 space-y-3">
-              {completed ? (
-                <Alert tone="ok">
-                  Meta cumplida — gracias a todos los que aportaron. Este pool
-                  ya no recibe donaciones.
-                </Alert>
-              ) : (
-                <>
-                  <AssetChips value={assetCode} onChange={setAssetCode} />
-                  <Field label="Monto">
-                    <TextInput
-                      value={amount}
-                      onChange={(event) => setAmount(event.target.value)}
-                      placeholder="0.00"
-                      inputMode="decimal"
-                    />
-                  </Field>
-                </>
-              )}
-              {!pool.vaultRegistered && hasTrustline === false ? (
-                <Alert tone="error">
-                  La wallet que recibe todavía no acepta {assetCode}.
-                  {canOpenTrustline
-                    ? ' Abrí la trustline con Freighter desde esta misma cuenta.'
-                    : ' La cuenta receptora tiene que aceptar el asset en Freighter.'}
-                </Alert>
-              ) : null}
-              {error ? <Alert tone="error">{error}</Alert> : null}
-              {ok ? <Alert tone="ok">{ok}</Alert> : null}
-              {busy ? <Spinner label={busy} /> : null}
-              {!completed ? (
+            <div className="dash-tabs" role="tablist">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === tab.id}
+                  className={`dash-tab ${activeTab === tab.id ? 'is-active' : ''}`}
+                  onClick={() => setActionTab(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            {activeTab === 'donate' || activeTab === 'withdraw' ? (
+              <AssetChips value={assetCode} onChange={setAssetCode} />
+            ) : null}
+            {activeTab === 'donate' ? (
+              <div className="mt-3 space-y-3">
+                <Field label="Monto">
+                  <TextInput
+                    value={amount}
+                    onChange={(event) => setAmount(event.target.value)}
+                    placeholder="0.00"
+                    inputMode="decimal"
+                  />
+                </Field>
+                {!pool.vaultRegistered && hasTrustline === false ? (
+                  <Alert tone="error">
+                    La wallet que recibe todavía no acepta {assetCode}.
+                    {canOpenTrustline
+                      ? ' Activalo con tu billetera desde esta misma cuenta.'
+                      : ' Quien recibe tiene que activar el activo en su billetera.'}
+                  </Alert>
+                ) : null}
+                {error ? <Alert tone="error">{error}</Alert> : null}
+                {ok ? <Alert tone="ok">{ok}</Alert> : null}
+                {donationStatus !== 'idle' ? (
+                  <TxStepper status={donationStatus} />
+                ) : busy ? (
+                  <Spinner label={busy} />
+                ) : null}
+                {donationStatus === 'ok' && donationHash ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link to={`/track/${donationHash}`}>
+                      <Button variant="white">Seguí tu aporte →</Button>
+                    </Link>
+                    <span className="text-sm text-white/55">
+                      Compartilo con quien administra el pool.
+                    </span>
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="white"
-                    onClick={() => void shareUri()}
-                  >
-                    {copied ? 'Link copiado' : 'Copiar link'}
-                  </Button>
                   {canOpenTrustline && hasTrustline === false ? (
                     <Button variant="black" disabled={Boolean(busy)} onClick={() => void openTrustline()}>
-                      Abrir trustline
+                      Activar {assetCode}
                     </Button>
                   ) : null}
                   {publicKey ? (
@@ -502,30 +729,22 @@ function PoolDetailContent() {
                       disabled={Boolean(busy) || selfDonation}
                       onClick={() => void depositFromFreighter()}
                     >
-                      Depositar
+                      Aportar
                     </Button>
                   ) : (
-                    <Button disabled={connecting} onClick={() => void connect()}>
-                      {connecting ? 'Conectando…' : 'Conectar Freighter'}
-                    </Button>
+                    <FreighterCta />
                   )}
                 </div>
-              ) : null}
-              {selfDonation && !completed ? (
-                <p className="text-sm leading-5 text-purple-deep/70">
-                  Creaste este pool: no podés donarte a vos mismo.
-                </p>
-              ) : null}
-            </div>
-          </DashCard>
-          {pool.vaultRegistered && youArePoolWallet ? (
-            <DashCard
-              title="Usar los fondos"
-              hint="Retirá al momento, firmando con la wallet del pool."
-            >
-              <div className="mt-4 space-y-3">
-                <AssetChips value={withdrawAssetCode} onChange={setWithdrawAssetCode} />
-                <Field label={`Monto (${withdrawAssetCode})`}>
+                {selfDonation ? (
+                  <p className="text-sm leading-5 text-white/55">
+                    Creaste este pool: no podés aportarte a vos mismo.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            {activeTab === 'withdraw' ? (
+              <div className="mt-3 space-y-3">
+                <Field label={`Monto (${assetCode})`}>
                   <TextInput
                     value={withdrawAmount}
                     onChange={(event) => setWithdrawAmount(event.target.value)}
@@ -543,15 +762,27 @@ function PoolDetailContent() {
                 {vaultError ? <Alert tone="error">{vaultError}</Alert> : null}
                 {vaultOk ? <Alert tone="ok">{vaultOk}</Alert> : null}
                 {vaultBusy ? <Spinner label={vaultBusy} /> : null}
-                <Button
-                  disabled={Boolean(vaultBusy)}
-                  onClick={() => void withdrawFromVault()}
-                >
+                <Button disabled={Boolean(vaultBusy)} onClick={() => void withdrawFromVault()}>
                   Retirar
                 </Button>
               </div>
-            </DashCard>
-          ) : null}
+            ) : null}
+            {activeTab === 'share' ? (
+              <div className="dash-share-row">
+                <p>
+                  {completed
+                    ? 'La meta se cumplió. Compartí el resultado con quien aportó.'
+                    : 'Copiá el link o el código corto.'}
+                </p>
+                {shareBar}
+                {completed && publicKey ? (
+                  <Link to="/pools/nuevo">
+                    <Button variant="white">Crear otro pool</Button>
+                  </Link>
+                ) : null}
+              </div>
+            ) : null}
+          </DashCard>
         </DashCol>
       </DashBoard>
     </div>

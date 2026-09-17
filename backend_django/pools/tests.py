@@ -399,4 +399,85 @@ class VaultViewTests(APITestCase):
         self.assertTrue(response.json()["registered"])
 
 
+class VaultLeaderboardViewTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.pool = Pool.objects.create(
+            short_code="leaderpool1",
+            wallet_address=WALLET,
+            title="Pool con leaderboard",
+            creator=CREATOR,
+            vault_registered=True,
+        )
+
+    def test_devuelve_el_top_de_donantes_del_contrato(self):
+        donors = [
+            {"public_key": DONOR, "donated_xlm_equivalent": "50"},
+            {"public_key": CREATOR, "donated_xlm_equivalent": "30"},
+        ]
+        with mock.patch.object(pool_views, "get_vault_leaderboard", return_value=donors):
+            response = self.client.get(
+                reverse("pool-vault-leaderboard", args=[self.pool.short_code])
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["donors"][0]["public_key"], DONOR)
+        self.assertEqual(response.json()["donors"][0]["donated_xlm_equivalent"], "50")
+
+    def test_pool_inexistente_da_404(self):
+        response = self.client.get(
+            reverse("pool-vault-leaderboard", args=["nopoool12"])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_soroban_caido_da_503(self):
+        with mock.patch.object(
+            pool_views, "get_vault_leaderboard", side_effect=pool_views.VaultUnavailableError()
+        ):
+            response = self.client.get(
+                reverse("pool-vault-leaderboard", args=[self.pool.short_code])
+            )
+        self.assertEqual(response.status_code, 503)
+
+
+class DeadlineTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def _create(self, body):
+        with mock.patch.object(
+            pool_views, "get_latest_horizon_cursor", return_value="cursor0"
+        ):
+            return self.client.post(reverse("pool-create"), body, format="json")
+
+    def test_crear_pool_con_deadline(self):
+        response = self._create(
+            {
+                "wallet_address": WALLET,
+                "title": "Pool con fecha",
+                "creator": CREATOR,
+                "deadline": "2036-01-01T00:00:00Z",
+            }
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["pool"]["deadline"], "2036-01-01T00:00:00Z")
+
+    def test_deadline_es_opcional(self):
+        response = self._create(
+            {"wallet_address": WALLET, "title": "Pool sin fecha", "creator": CREATOR}
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.json()["pool"]["deadline"])
+
+    def test_deadline_invalido_da_400(self):
+        response = self._create(
+            {
+                "wallet_address": WALLET,
+                "title": "Pool con fecha rota",
+                "creator": CREATOR,
+                "deadline": "no-es-una-fecha",
+            }
+        )
+        self.assertEqual(response.status_code, 400)
+
+
 

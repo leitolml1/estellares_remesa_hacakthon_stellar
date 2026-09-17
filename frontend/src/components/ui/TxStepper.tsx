@@ -2,10 +2,10 @@ import { animate } from 'animejs'
 import { useLayoutEffect, useRef } from 'react'
 
 const STEPS = [
-  { id: 'building', label: 'Armar XDR' },
+  { id: 'building', label: 'Armar' },
   { id: 'signing', label: 'Firmar' },
-  { id: 'submitting', label: 'Horizon' },
-  { id: 'ok', label: 'Ledger' },
+  { id: 'submitting', label: 'Enviar' },
+  { id: 'ok', label: 'Listo' },
 ] as const
 
 type StepId = (typeof STEPS)[number]['id']

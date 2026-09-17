@@ -23,13 +23,12 @@ import type { CommunityPool } from '../types'
 export function CreatePoolPage() {
   return (
     <PageStage
-      kicker="Módulo 2"
       title="NUEVO POOL"
-      subtitle="Tu wallet recibe las donaciones y nace registrado al vault: retiros al momento y meta enforced on-chain."
+      subtitle="Creá una colecta con meta. Compartí el link y cualquiera puede aportar."
     >
       <WalletGate
         title="Conectá para crear un pool"
-        description="La wallet conectada recibe las donaciones, queda como creadora y firma el alta en el vault."
+        description="La wallet conectada recibe los aportes, queda como creadora y firma el alta."
       >
         <CreatePoolForm />
       </WalletGate>
@@ -44,6 +43,7 @@ function CreatePoolForm() {
   const navigate = useNavigate()
   const [title, setTitle] = useState('')
   const [goal, setGoal] = useState('')
+  const [deadline, setDeadline] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [vaultBusy, setVaultBusy] = useState<string | null>(null)
@@ -53,10 +53,10 @@ function CreatePoolForm() {
 
   async function registerVault(shortCode: string): Promise<void> {
     if (!publicKey) return
-    setVaultBusy('Registrando en el vault…')
+    setVaultBusy('Registrando la colecta…')
     try {
       const { xdr } = await buildVaultRegister(shortCode, publicKey)
-      setVaultBusy('Firmá el alta del vault en Freighter…')
+      setVaultBusy('Firmá el alta en tu billetera…')
       const signed = await signTransactionWithFreighter(
         xdr,
         TESTNET_NETWORK_PASSPHRASE,
@@ -81,6 +81,19 @@ function CreatePoolForm() {
       setError('La meta tiene que ser un monto Stellar válido, o quedar vacía.')
       return
     }
+    let deadlineValue: string | undefined
+    if (deadline.trim()) {
+      const parsed = new Date(deadline.trim())
+      if (Number.isNaN(parsed.getTime())) {
+        setError('La fecha límite no es una fecha válida.')
+        return
+      }
+      if (parsed.getTime() <= Date.now()) {
+        setError('La fecha límite tiene que ser futura.')
+        return
+      }
+      deadlineValue = parsed.toISOString()
+    }
 
     setLoading(true)
     try {
@@ -88,6 +101,7 @@ function CreatePoolForm() {
         walletPublicKey: publicKey,
         title: title.trim(),
         goalAmount: goal.trim() || undefined,
+        deadline: deadlineValue,
         creator: publicKey,
       })
       savePool({
@@ -107,7 +121,7 @@ function CreatePoolForm() {
       } catch (caught) {
         setVaultFailed(true)
         setError(
-          `El pool se creó, pero el registro en el vault falló: ${humanizeApiError(caught)}`,
+          `El pool se creó, pero el alta no se completó: ${humanizeApiError(caught)}`,
         )
       }
     } catch (caught) {
@@ -126,7 +140,7 @@ function CreatePoolForm() {
     } catch (caught) {
       setVaultFailed(true)
       setError(
-        `Sigue fallando el registro en el vault: ${humanizeApiError(caught)}`,
+        `Sigue fallando el alta: ${humanizeApiError(caught)}`,
       )
     }
   }
@@ -137,12 +151,12 @@ function CreatePoolForm() {
       <div ref={reveal}>
         <FormPanel className="mx-auto max-w-2xl md:mx-0">
           <h2 className="text-xl font-black tracking-tight sm:text-2xl">
-            {vaultFailed ? 'Pool creado, falta el vault' : 'Pool creado en el vault'}
+            {vaultFailed ? 'Pool creado, falta completar el alta' : 'Pool creado'}
           </h2>
           <p className="mt-1.5 text-sm leading-5 text-purple-deep/75">
             {vaultFailed
-              ? 'El pool funciona como clásico (donaciones directo a tu wallet) hasta que completes el alta en el vault.'
-              : 'Las donaciones nuevas entran al vault: retiros al momento y meta enforced on-chain.'}
+              ? 'Los aportes van directo a tu wallet hasta que completes el alta.'
+              : 'Ya podés compartir el link. Los aportes entran a la colecta y podés retirar cuando quieras.'}
           </p>
           {vaultFailed && error ? <Alert tone="error">{error}</Alert> : null}
           <div className="mt-3 flex flex-wrap gap-2">
@@ -183,8 +197,8 @@ function CreatePoolForm() {
             <AcceptedAssets />
           </div>
           <p className="mt-3 text-base leading-6 text-purple-deep/80">
-            USDC y EURC necesitan trustline en tu wallet (issuers Circle en
-            testnet). XLM no.
+            USDC y EURC necesitan activar el activo en tu billetera
+            (Circle en testnet). XLM no.
           </p>
         </div>
         <Field label="Meta en XLM" hint="Opcional. Las donaciones de cualquier asset siguen siendo libres.">
@@ -195,6 +209,16 @@ function CreatePoolForm() {
             inputMode="decimal"
           />
         </Field>
+        <Field
+          label="Fecha límite"
+          hint="Opcional. Informativa: se muestra como countdown en el pool."
+        >
+          <TextInput
+            type="datetime-local"
+            value={deadline}
+            onChange={(event) => setDeadline(event.target.value)}
+          />
+        </Field>
         <div className="form-note">
           <p className="text-sm font-semibold uppercase tracking-[0.16em] text-purple-deep">
             Wallet que recibe
@@ -203,14 +227,14 @@ function CreatePoolForm() {
             {truncateKey(publicKey ?? '', 6)} · tu wallet conectada
           </p>
           <p className="mt-2 text-sm leading-5 text-purple-deep/70">
-            Es la owner del vault: firma el alta al crear y después retira
+            Es la cuenta que firma el alta al crear y después retira
             los fondos cuando quiera.
           </p>
         </div>
         {error ? <Alert tone="error">{error}</Alert> : null}
         {loading ? <Spinner label={vaultBusy ?? 'Creando pool…'} /> : null}
         <Button type="submit" disabled={loading}>
-          Crear y registrar en el vault →
+          Crear colecta →
         </Button>
       </form>
     </FormPanel>

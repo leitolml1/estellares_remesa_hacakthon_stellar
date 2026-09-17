@@ -4,6 +4,8 @@ const POOLS_KEY = 'remesa.savedPools.v1'
 const FAMILY_KEY = 'remesa.familyPools.v2'
 const PENDING_KEY = 'remesa.familyPendingTx.v1'
 
+const LABELS_KEY = 'remesa.familyLabels.v1'
+
 function readJson<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key)
@@ -44,4 +46,18 @@ export function savePendingFamilyTx(tx: PendingFamilyTx | null): void {
     return
   }
   localStorage.setItem(PENDING_KEY, JSON.stringify(tx))
+}
+
+export function getFamilyLabels(poolAccount: string): Record<string, string> {
+  const all = readJson<Record<string, Record<string, string>>>(LABELS_KEY, {})
+  return all[poolAccount] ?? {}
+}
+
+export function setFamilyLabel(poolAccount: string, publicKey: string, name: string): void {
+  const all = readJson<Record<string, Record<string, string>>>(LABELS_KEY, {})
+  const next = { ...(all[poolAccount] ?? {}) }
+  if (name.trim()) next[publicKey] = name.trim()
+  else delete next[publicKey]
+  all[poolAccount] = next
+  localStorage.setItem(LABELS_KEY, JSON.stringify(all))
 }

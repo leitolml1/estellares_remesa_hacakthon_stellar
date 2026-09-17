@@ -21,14 +21,13 @@ export function ReceivePage() {
 
   return (
     <PageStage
-      kicker="Módulo 1"
       title="RECIBIR"
-      subtitle="Mostrá tu QR en XLM, USDC o EURC. Cualquier wallet Stellar puede pagarte."
+      subtitle="Mostrá tu QR. Cualquiera puede pagarte desde su billetera."
       lead={publicKey ? <ReceiveBalances /> : null}
     >
       <WalletGate
         title="Conectá para recibir"
-        description="Mostrá tu QR o copiá la public key. Cualquier wallet Stellar puede pagarte."
+        description="Mostrá tu QR o copiá tu cuenta. Cualquier billetera Stellar puede pagarte."
       >
         <ReceiveQr />
       </WalletGate>
@@ -70,29 +69,29 @@ function ReceiveQr() {
       {missingTrustline ? (
         <div className="mt-5 w-full">
           <Alert tone="error">
-            Tu cuenta todavía no tiene trustline para {assetCode}. Abrila
-            en Freighter (Circle testnet) antes de pedir ese asset.
+            Tu cuenta todavía no acepta {assetCode}. Activalo
+            en tu billetera antes de pedir ese activo.
           </Alert>
         </div>
       ) : null}
       <div className="mt-6">
         <QrPanel
           value={uri}
-          caption={`URI SEP-7 en ${assetCode}. Lobstr, Freighter u otra wallet compatible pueden escanearlo.`}
+          caption={`Pago con QR en ${assetCode}. Cualquier billetera compatible puede escanearlo.`}
         />
       </div>
       <div className="mt-6 flex flex-wrap justify-center gap-2">
         <Button onClick={() => void copy(publicKey, 'key')}>
-          Copiar public key
+          Copiar cuenta
         </Button>
         <Button variant="white" onClick={() => void copy(uri, 'uri')}>
-          Copiar URI
+          Copiar link de pago
         </Button>
       </div>
       {copied ? (
         <div className="mt-4 w-full">
           <Alert tone="ok">
-            {copied === 'key' ? 'Public key copiada.' : 'URI copiada.'}
+            {copied === 'key' ? 'Cuenta copiada.' : 'Link de pago copiado.'}
           </Alert>
         </div>
       ) : null}
@@ -155,8 +154,8 @@ function ReceiveBalances() {
       </FormPanel>
       <DarkPanel>
         <p className="text-base leading-7 text-white/75">
-          Si te van a pagar USDC o EURC, primero tenés que abrir la
-          trustline. El envío chequea Horizon antes de firmar.
+          Si te van a pagar USDC o EURC, primero tenés que activar el
+          activo. El envío lo chequea antes de firmar.
         </p>
       </DarkPanel>
     </>

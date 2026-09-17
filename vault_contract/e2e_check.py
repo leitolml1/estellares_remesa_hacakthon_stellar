@@ -22,7 +22,7 @@ RPC_URL = "https://soroban-testnet.stellar.org"
 HORIZON_URL = "https://horizon-testnet.stellar.org"
 FRIENDBOT = "https://friendbot.stellar.org"
 
-VAULT_ID = "CATQKYDF53TJDHK5WHXAXUAKV4GMPDLIJY5BB3PCUHE5RO467JDVILJK"
+VAULT_ID = "CCIXECDJABDC3Y6TBDBTTR4I773AFONQVMJZZRUE4ZRV6DRDVEFWA4OH"
 
 STROOP = 10_000_000
 POLL_ATTEMPTS = 20
@@ -169,6 +169,15 @@ def main() -> int:
     assert native["assets"][0]["donated"] == 3 * STROOP, native
     assert native["assets"][0]["available"] == 2 * STROOP, native
     print("estado final OK ->", summarize(native))
+
+    # 7. leaderboard: el donante figura con su equivalente, ordenado desc.
+    leaderboard = scval_native(read("donors", [to_string(code_a)]))
+    assert len(leaderboard) == 1, leaderboard
+    entry = leaderboard[0]
+    donor_key = entry[0].address if hasattr(entry[0], "address") else str(entry[0])
+    assert donor_key == donor.public_key, leaderboard
+    assert entry[1] == 3 * STROOP, leaderboard
+    print("leaderboard OK ->", [(donor_key[:10], entry[1])])
 
     print("\nE2E COMPLETO: todas las reglas del vault funcionan on-chain.")
     return 0

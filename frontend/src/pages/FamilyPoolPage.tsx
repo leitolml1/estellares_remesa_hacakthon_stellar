@@ -50,7 +50,7 @@ import {
   TESTNET_NETWORK_PASSPHRASE,
   explorerTxUrl,
   formatAmount,
-  formatDate,
+  fullAmountTitle,
   isStellarAmount,
   isStellarPublicKey,
   truncateKey,
@@ -68,9 +68,11 @@ import {
   submitSignedXdr,
 } from '../lib/horizon'
 import {
+  getFamilyLabels,
   getPendingFamilyTx,
   saveFamilyPool,
   savePendingFamilyTx,
+  setFamilyLabel,
 } from '../lib/storage'
 import type {
   AccountBalance,
@@ -91,6 +93,50 @@ function walletPowerLabel(power: WalletPower) {
   return WALLET_POWERS.find((item) => item.id === power)?.label ?? 'Depósito y retiro'
 }
 
+function FamilyTabsBar({
+  pools,
+  activeAccount,
+  creating = false,
+  onSelect,
+  onCreate,
+}: {
+  pools: FamilyPoolRecord[]
+  activeAccount: string | null
+  creating?: boolean
+  onSelect: (account: string) => void
+  onCreate: () => void
+}) {
+  if (pools.length === 0) return null
+  return (
+    <div className="family-tabs-bar">
+      <div className="family-tabs" role="tablist" aria-label="Cajas familiares">
+        {pools.map((item) => {
+          const selected = !creating && item.poolAccount === activeAccount
+          return (
+            <button
+              key={item.poolAccount}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              className={`family-tab ${selected ? 'is-active' : ''}`}
+              onClick={() => onSelect(item.poolAccount)}
+            >
+              {item.title}
+            </button>
+          )
+        })}
+      </div>
+      <button
+        type="button"
+        className={`family-tabs-new ${creating ? 'is-active' : ''}`}
+        onClick={onCreate}
+      >
+        Nueva caja
+      </button>
+    </div>
+  )
+}
+
 function toApiRole(power: WalletPower) {
   return power.replaceAll('-', '_')
 }
@@ -108,17 +154,30 @@ export function FamilyPoolPage() {
     <PageStage
       className="family-pool-stage"
       layout="dashboard"
-      kicker="Módulo 3"
       title="FAMILIA"
-      subtitle="Caja multisig on-chain. Django arma el XDR; Freighter y la key efímera firman. La secret del pool nunca sale de este navegador."
+      subtitle="Caja familiar: todos pueden aportar; los retiros necesitan más de una firma. Tu clave no sale del navegador."
     >
       <WalletGate
-        title="Conectá para el pool familiar"
-        description="Hace falta Freighter para fondear la caja y firmar depósitos o retiros."
+        title="Conectá para la caja familiar"
+        description="Hace falta tu billetera para aportar y firmar retiros."
+        preview={<FamilyPreview />}
       >
         <FamilyContent />
       </WalletGate>
     </PageStage>
+  )
+}
+
+function FamilyPreview() {
+  return (
+    <div className="rounded-[28px] border border-purple/15 bg-white/70 px-5 py-4 text-sm leading-6 text-purple-deep">
+      <p className="font-semibold">Qué ganás al conectar</p>
+      <ul className="mt-2 list-disc space-y-1 pl-5">
+        <li>Ver el patrimonio de la caja compartida.</li>
+        <li>Aportar cuando quieras, con tu rol.</li>
+        <li>Los retiros piden la firma de quien corresponde.</li>
+      </ul>
+    </div>
   )
 }
 
@@ -129,7 +188,13 @@ function FamilyContent() {
   const [creating, setCreating] = useState(false)
   const [loading, setLoading] = useState(true)
   const [listError, setListError] = useState<string | null>(null)
-  const pool = pools.find((item) => item.poolAccount === activeAccount) ?? null
+  const visiblePools = import.meta.env.DEV
+    ? pools
+    : pools.filter((item) => !/prueba/i.test(item.title))
+  const pool =
+    visiblePools.find((item) => item.poolAccount === activeAccount) ??
+    visiblePools[0] ??
+    null
 
   useEffect(() => {
     if (!publicKey) return
@@ -176,24 +241,41 @@ function FamilyContent() {
 
   if (creating || !pool) {
     return (
-      <CreateFamilyForm
-        publicKey={publicKey}
-        onCreated={remember}
-        onCancel={pools.length > 0 ? () => setCreating(false) : undefined}
-      />
+      <div className="space-y-4">
+        <FamilyTabsBar
+          pools={visiblePools}
+          activeAccount={null}
+          creating
+          onSelect={(account) => {
+            setActiveAccount(account)
+            setCreating(false)
+          }}
+          onCreate={() => setCreating(true)}
+        />
+        <CreateFamilyForm
+          publicKey={publicKey}
+          onCreated={remember}
+          onCancel={visiblePools.length > 0 ? () => setCreating(false) : undefined}
+        />
+      </div>
     )
   }
 
   return (
-    <FamilyDashboard
-      publicKey={publicKey}
-      pool={pool}
-      pools={pools}
-      onSelect={setActiveAccount}
-      onCreateAnother={() => setCreating(true)}
-      onRefreshWallet={() => void refreshBalances()}
-      onPoolUpdated={remember}
-    />
+    <div className="space-y-4">
+      <FamilyTabsBar
+        pools={visiblePools}
+        activeAccount={pool.poolAccount}
+        onSelect={setActiveAccount}
+        onCreate={() => setCreating(true)}
+      />
+      <FamilyDashboard
+        publicKey={publicKey}
+        pool={pool}
+        onRefreshWallet={() => void refreshBalances()}
+        onPoolUpdated={remember}
+      />
+    </div>
   )
 }
 
@@ -207,11 +289,6 @@ function CreateFamilyForm({
   onCancel?: () => void
 }) {
   const [title, setTitle] = useState('Pozo de la casa')
-  const [withdrawalLimit, setWithdrawalLimit] = useState('50')
-  const [usdcLimit, setUsdcLimit] = useState('')
-  const [eurcLimit, setEurcLimit] = useState('')
-  const [extraBalance, setExtraBalance] = useState('')
-  const [medThreshold, setMedThreshold] = useState('1')
   const [extraMembers, setExtraMembers] = useState<
     { publicKey: string; power: WalletPower }[]
   >([])
@@ -250,23 +327,6 @@ function CreateFamilyForm({
       setError('El nombre tiene que tener al menos 3 caracteres.')
       return
     }
-    if (!isStellarAmount(withdrawalLimit)) {
-      setError('El límite de retiro tiene que ser un monto válido.')
-      return
-    }
-    for (const [code, value] of [
-      ['USDC', usdcLimit],
-      ['EURC', eurcLimit],
-    ] as const) {
-      if (value.trim() && !isStellarAmount(value)) {
-        setError(`El tope de retiro de ${code} tiene que ser un monto válido, o quedar vacío.`)
-        return
-      }
-    }
-    if (extraBalance.trim() && extraBalance.trim() !== '0' && !isStellarAmount(extraBalance)) {
-      setError('El saldo extra tiene que ser un monto válido, o quedar vacío.')
-      return
-    }
     const onchainSigners = members
       .filter((member) => member.power !== 'deposit')
       .map((member) => ({
@@ -280,16 +340,11 @@ function CreateFamilyForm({
       members.map((member) => [member.publicKey, toApiRole(member.power)]),
     )
     const payload = onchainSigners
-    const threshold = Number(medThreshold)
-    const totalWeight = payload.reduce((sum, signer) => sum + signer.weight, 0)
-    if (!Number.isInteger(threshold) || threshold < 1) {
-      setError('El umbral medio tiene que ser un entero mayor a 0.')
+    if (payload.length === 0) {
+      setError('Hace falta al menos una wallet con retiro.')
       return
     }
-    if (threshold > totalWeight) {
-      setError('El umbral no puede superar la cantidad de wallets con retiro.')
-      return
-    }
+    const threshold = 1
 
     const keys = generatePoolKeypair()
     try {
@@ -302,7 +357,7 @@ function CreateFamilyForm({
           pool_public_key: keys.publicKey,
           signers: payload,
           med_threshold: threshold,
-          extra_starting_balance: extraBalance.trim() || '0',
+          extra_starting_balance: '0',
         })
         createXdr = created.xdr
       } catch (caught) {
@@ -330,22 +385,18 @@ function CreateFamilyForm({
         }),
       )
 
-      setBusy('Firmando con la key efímera del pool…')
+      setBusy('Firmando la alta de la caja…')
       const signedConfig = signXdrWithSecret(configure.xdr, keys.secret)
       setBusy('Enviando SetOptions a Horizon…')
       await submitSignedXdr(signedConfig)
 
       setBusy('Confirmando la caja en Django…')
-      const assetWithdrawalLimits: Partial<Record<'USDC' | 'EURC', string>> = {}
-      if (usdcLimit.trim()) assetWithdrawalLimits.USDC = usdcLimit.trim()
-      if (eurcLimit.trim()) assetWithdrawalLimits.EURC = eurcLimit.trim()
       const pool = await retryNotFound(() =>
         confirmFamilyPool({
           pool_public_key: keys.publicKey,
           title: title.trim(),
           creator_public_key: publicKey,
-          withdrawal_limit: withdrawalLimit.trim(),
-          asset_withdrawal_limits: assetWithdrawalLimits,
+          withdrawal_limit: '50',
           depositors,
           wallet_roles: walletRoles,
         }),
@@ -361,62 +412,14 @@ function CreateFamilyForm({
   return (
     <div ref={reveal}>
     <FormPanel className="mx-auto max-w-2xl md:mx-0">
-      <h2 className="text-xl font-black tracking-tight sm:text-2xl">Crear pool familiar</h2>
+      <h2 className="text-xl font-black tracking-tight sm:text-2xl">Crear caja familiar</h2>
       <p className="mt-1.5 text-sm leading-5 text-purple-deep/75">
-        Se genera una cuenta nueva en este navegador. Django nunca ve la
-        secret: solo arma los XDR y después lee el ledger.
+        Se arma una cuenta nueva en este navegador. Tu clave no sale de acá.
       </p>
       <div className="mt-3.5 space-y-2.5">
         <Field label="Nombre">
           <TextInput value={title} onChange={(event) => setTitle(event.target.value)} />
         </Field>
-        <div className="grid gap-2.5 sm:grid-cols-3">
-          <Field label="Límite de retiro (XLM)">
-            <TextInput
-              value={withdrawalLimit}
-              onChange={(event) => setWithdrawalLimit(event.target.value)}
-              inputMode="decimal"
-            />
-          </Field>
-          <Field label="Tope retiro USDC">
-            <TextInput
-              value={usdcLimit}
-              onChange={(event) => setUsdcLimit(event.target.value)}
-              placeholder="opcional · vacío = deshabilitado"
-              inputMode="decimal"
-            />
-          </Field>
-          <Field label="Tope retiro EURC">
-            <TextInput
-              value={eurcLimit}
-              onChange={(event) => setEurcLimit(event.target.value)}
-              placeholder="opcional · vacío = deshabilitado"
-              inputMode="decimal"
-            />
-          </Field>
-        </div>
-        <div className="grid gap-2.5 sm:grid-cols-3">
-          <Field label="Umbral medio">
-            <TextInput
-              value={medThreshold}
-              onChange={(event) => setMedThreshold(event.target.value)}
-              inputMode="numeric"
-            />
-          </Field>
-          <Field label="Saldo extra">
-            <TextInput
-              value={extraBalance}
-              onChange={(event) => setExtraBalance(event.target.value)}
-              placeholder="0 · opcional"
-              inputMode="decimal"
-            />
-          </Field>
-        </div>
-        <p className="form-hint">
-          Umbral: cuántas wallets con retiro tienen que firmar para sacar
-          fondos. El saldo extra se suma al mínimo que pide Stellar. Sin tope
-          propio, un asset no se puede retirar (nunca se reusa el tope de XLM).
-        </p>
         <div className="family-signers">
           <p className="form-label">Wallets</p>
           <ul className="mt-1.5 space-y-1 text-sm">
@@ -453,7 +456,7 @@ function CreateFamilyForm({
         {busy ? <Spinner label={busy} /> : null}
         <div className="flex flex-wrap gap-2">
           <Button type="button" disabled={Boolean(busy)} onClick={() => void createPool()}>
-            Crear on-chain →
+            Crear caja →
           </Button>
           {onCancel ? (
             <Button type="button" variant="ghost" disabled={Boolean(busy)} onClick={onCancel}>
@@ -470,17 +473,11 @@ function CreateFamilyForm({
 function FamilyDashboard({
   publicKey,
   pool,
-  pools,
-  onSelect,
-  onCreateAnother,
   onRefreshWallet,
   onPoolUpdated,
 }: {
   publicKey: string
   pool: FamilyPoolRecord
-  pools: FamilyPoolRecord[]
-  onSelect: (account: string) => void
-  onCreateAnother: () => void
   onRefreshWallet: () => void
   onPoolUpdated: (pool: FamilyPoolRecord) => void
 }) {
@@ -503,7 +500,14 @@ function FamilyDashboard({
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
   const [incoming, setIncoming] = useState<PaymentRecord[]>([])
+  const [showAllMoves, setShowAllMoves] = useState(false)
+  const [showAllWallets, setShowAllWallets] = useState(false)
+  const [labels, setLabels] = useState(() => getFamilyLabels(pool.poolAccount))
   const reveal = useUnfoldDown(pool.poolAccount)
+
+  useEffect(() => {
+    setLabels(getFamilyLabels(pool.poolAccount))
+  }, [pool.poolAccount])
 
   useEffect(() => {
     let cancelled = false
@@ -567,7 +571,7 @@ function FamilyDashboard({
       return
     }
     if (selectedAsset.issuer && !poolHasAsset) {
-      setError(`La caja todavía no acepta ${selectedAsset.code}. Primero abrí la trustline.`)
+      setError(`La caja todavía no acepta ${selectedAsset.code}. Primero activá el activo.`)
       return
     }
     try {
@@ -628,7 +632,7 @@ function FamilyDashboard({
       return
     }
     if (kind === 'withdraw' && selectedAsset.issuer && !poolHasAsset) {
-      setError(`La caja no tiene trustline para ${selectedAsset.code}.`)
+      setError(`La caja no tiene ${selectedAsset.code} activado.`)
       return
     }
     if (kind === 'withdraw' && maxWithdrawal == null) {
@@ -642,7 +646,7 @@ function FamilyDashboard({
       return
     }
     if ((kind === 'blend-supply' || kind === 'blend-withdraw') && assetCode !== 'XLM') {
-      setError('Blend en esta demo solo mueve XLM.')
+      setError('El rendimiento en esta demo solo mueve XLM.')
       return
     }
     try {
@@ -665,7 +669,7 @@ function FamilyDashboard({
         xdr = (await buildBlendWithdraw(pool.poolAccount, amount.trim(), publicKey)).xdr
       }
 
-      setBusy('Firmá con Freighter…')
+      setBusy('Firmá en tu billetera…')
       const signed = await signTransactionWithFreighter(
         xdr,
         TESTNET_NETWORK_PASSPHRASE,
@@ -690,13 +694,13 @@ function FamilyDashboard({
 
   async function startTrustline() {
     if (!selectedAsset.issuer) {
-      setError('XLM no necesita trustline.')
+      setError('XLM no necesita activar el activo.')
       return
     }
     try {
       setError(null)
       setOk(null)
-      setBusy(`Armando trustline ${selectedAsset.code}…`)
+      setBusy(`Activando ${selectedAsset.code}…`)
       const built = await buildFamilyTrustline(pool.poolAccount, {
         asset_code: selectedAsset.code,
         requester_public_key: publicKey,
@@ -841,7 +845,7 @@ function FamilyDashboard({
     if (!pending) return
     try {
       setError(null)
-      setBusy('Firmá con Freighter…')
+      setBusy('Firmá en tu billetera…')
       const signed = await signTransactionWithFreighter(
         pending.xdr,
         TESTNET_NETWORK_PASSPHRASE,
@@ -884,29 +888,27 @@ function FamilyDashboard({
       .filter((key) => !pool.signers.some((signer) => signer.publicKey === key))
       .map((publicKey) => ({ publicKey, power: 'deposit' as const })),
   ]
+  const withdrawers = poolMembers.filter(
+    (member) => member.power === 'withdraw' || member.power === 'deposit-withdraw',
+  )
+
+  function memberLabel(key: string, index = 1) {
+    if (key === publicKey) return 'Vos'
+    if (labels[key]) return labels[key]
+    return `Wallet ${index}`
+  }
+
+  function movementLabel(key: string) {
+    if (key === publicKey) return 'Vos'
+    if (key === pool.poolAccount) return 'Caja'
+    const index = poolMembers.findIndex((member) => member.publicKey === key)
+    if (index >= 0) return memberLabel(key, index + 1)
+    if (labels[key]) return labels[key]
+    return 'Desconocido'
+  }
 
   return (
     <div ref={reveal} className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        {pools.map((item) => (
-          <button
-            key={item.poolAccount}
-            type="button"
-            onClick={() => onSelect(item.poolAccount)}
-            className={`rounded-full px-3 py-1.5 text-sm ${
-              item.poolAccount === pool.poolAccount
-                ? 'bg-yellow font-semibold text-ink'
-                : 'bg-white/70 text-purple-deep'
-            }`}
-          >
-            {item.title}
-          </button>
-        ))}
-        <Button variant="white" onClick={onCreateAnother}>
-          Nueva caja
-        </Button>
-      </div>
-
       {pending ? (
         <Alert tone="error">
           Hay un {pendingLabel(pending.kind)} esperando más firmas
@@ -935,105 +937,98 @@ function FamilyDashboard({
         </Alert>
       ) : null}
 
-      <DashBoard>
-        <DashCol>
-          <DashHero
-            kicker="Patrimonio de la caja"
-            value={
-              idleXlm != null
-                ? formatAmount(String(Number(idleXlm) + Number(blend?.currentValue ?? 0)), 'XLM')
-                : '—'
-            }
-            fiat={`tope de retiro ${formatAmount(pool.withdrawalLimit, 'XLM')}`}
-            extraLabel="Tu rol"
-            extra={<span className="dash-hero-chip">{walletPowerLabel(myPower)}</span>}
-            action={
-              canWithdraw ? (
-                <Button disabled={Boolean(busy)} onClick={() => void startSignedFlow('withdraw')}>
-                  Pedir retiro
-                </Button>
-              ) : canDeposit ? (
-                <Button disabled={Boolean(busy)} onClick={() => void deposit()}>
-                  Depositar
-                </Button>
-              ) : null
-            }
-          />
-        </DashCol>
-        <DashCol feed>
-          <DashCard
-            title="Movimientos"
-            hint="Todo lo que llegó a la cuenta de la caja."
-          >
-            {incoming.length === 0 ? (
-              <p className="dash-empty">Todavía no hay depósitos on-chain en esta caja.</p>
-            ) : (
-              <div className="dash-feed">
-                {incoming.map((item) => (
-                  <DashFeedItem
-                    key={item.id}
-                    from={truncateKey(item.from, 4)}
-                    date={formatDate(item.createdAt)}
-                    amount={formatAmount(item.amount, '')}
-                    code={displayAssetCode(item.assetCode)}
-                    href={explorerTxUrl(item.transactionHash)}
-                  />
-                ))}
-              </div>
-            )}
-          </DashCard>
-        </DashCol>
-      </DashBoard>
-
       {error ? <Alert tone="error">{error}</Alert> : null}
       {ok ? <Alert tone="ok">{ok}</Alert> : null}
       {busy ? <Spinner label={busy} /> : null}
 
       <DashBoard>
         <DashCol>
+          <DashHero
+            compact
+            kicker="Patrimonio de la caja"
+            value={
+              idleXlm != null
+                ? formatAmount(String(Number(idleXlm) + Number(blend?.currentValue ?? 0)), 'XLM')
+                : '—'
+            }
+            valueTitle={
+              idleXlm != null
+                ? fullAmountTitle(Number(idleXlm) + Number(blend?.currentValue ?? 0), 'XLM')
+                : undefined
+            }
+            fiat={`Tope de retiro ${formatAmount(pool.withdrawalLimit, 'XLM')} · ${walletPowerLabel(myPower)}`}
+            action={
+              canDeposit ? (
+                <Button
+                  variant="white"
+                  onClick={() =>
+                    document.getElementById('aportar')?.scrollIntoView({ behavior: 'smooth' })
+                  }
+                >
+                  Ir a aportar
+                </Button>
+              ) : null
+            }
+          />
+          {canDeposit && !canWithdraw ? (
+            <div className="dash-banner">
+              <p>
+                Tu rol es solo depósito. Pedile firmar a quien tiene retiro
+                {withdrawers.length > 0
+                  ? `: ${withdrawers
+                      .map((member, index) => memberLabel(member.publicKey, index + 1))
+                      .join(', ')}`
+                  : ''}
+                .
+              </p>
+              <Button variant="white" disabled title="Tu rol es solo depósito">
+                Retirar
+              </Button>
+            </div>
+          ) : null}
           {canDeposit ? (
             <DashCard
               title="Aportar"
-              hint="La caja acepta XLM, USDC y EURC. Compartí el QR para que depositen con cualquier wallet."
+              hint="Compartí el QR o depositá con Freighter."
             >
-              <div className="dash-qr-row">
+              <div id="aportar" className="dash-qr-row">
                 <div className="dash-qr-frame">
                   <QrPanel
                     value={buildPayUri({
                       destination: pool.poolAccount,
                       asset: selectedAsset,
                     })}
-                    size={148}
+                    size={120}
                     framed={false}
                   />
                 </div>
                 <div className="dash-addr">
                   <p className="dash-addr-label">Address de la caja</p>
-                  <p className="dash-addr-value">{truncateKey(pool.poolAccount, 6)}</p>
-                  <div className="dash-copy">
+                  <div className="dash-addr-row">
+                    <p className="dash-addr-value">{truncateKey(pool.poolAccount, 6)}</p>
                     <Button
                       variant="white"
                       onClick={() => void navigator.clipboard.writeText(pool.poolAccount)}
                     >
-                      Copiar address
+                      Copiar
                     </Button>
                   </div>
                 </div>
               </div>
-              <div className="mt-4">
+              <div className="mt-3">
                 <AssetChips value={assetCode} onChange={setAssetCode} tone="dark" />
               </div>
               {selectedAsset.issuer && !poolHasAsset ? (
-                <div className="mt-4">
+                <div className="mt-3">
                   <Alert tone="error">
                     La caja no acepta {selectedAsset.code} todavía.
                     {canWithdraw
-                      ? ' Alguien con retiro puede abrir la trustline acá mismo.'
-                      : ' Un wallet con retiro tiene que abrir la trustline.'}
+                      ? ' Alguien con retiro puede activar el activo acá mismo.'
+                      : ' Un wallet con retiro tiene que activar el activo.'}
                   </Alert>
                 </div>
               ) : null}
-              <div className="mt-4 space-y-2.5">
+              <div className="dash-form-grid">
                 <Field label={`Monto (${selectedAsset.code})`}>
                   <TextInput
                     value={depositAmount}
@@ -1041,12 +1036,14 @@ function FamilyDashboard({
                     inputMode="decimal"
                   />
                 </Field>
-                <Field label="Nota" hint="Opcional. Hasta 28 caracteres.">
+                <Field label="Nota" hint="Opcional. Máx. 28.">
                   <TextInput
                     value={depositNote}
                     onChange={(event) => setDepositNote(event.target.value)}
                   />
                 </Field>
+              </div>
+              <div className="mt-3">
                 <Button disabled={Boolean(busy)} onClick={() => void deposit()}>
                   Depositar
                 </Button>
@@ -1056,13 +1053,13 @@ function FamilyDashboard({
           {canWithdraw ? (
             <DashCard
               title="Operar"
-              hint="Django valida el tope de retiro antes de armar la tx. Blend es solo XLM."
+              hint="Hay un tope de retiro. El rendimiento es solo XLM."
             >
               <div className="mt-3 space-y-2.5">
                 {selectedAsset.issuer && !poolHasAsset ? (
                   <Alert tone="error">
-                    La caja no acepta {selectedAsset.code} todavía: pedí la
-                    trustline (usa el mismo umbral que un retiro).
+                    La caja no acepta {selectedAsset.code} todavía: pedí
+                    activar el activo (usa el mismo umbral que un retiro).
                   </Alert>
                 ) : null}
                 <Field label={`Monto (${selectedAsset.code})`}>
@@ -1084,7 +1081,7 @@ function FamilyDashboard({
                     spellCheck={false}
                   />
                 </Field>
-                <Field label="Nota" hint="Opcional. Hasta 28 caracteres.">
+                <Field label="Nota" hint="Opcional. Máx. 28.">
                   <TextInput
                     value={note}
                     onChange={(event) => setNote(event.target.value)}
@@ -1105,7 +1102,7 @@ function FamilyDashboard({
                     disabled={Boolean(busy)}
                     onClick={() => void startTrustline()}
                   >
-                    Abrir trustline {selectedAsset.code}
+                    Activar {selectedAsset.code}
                   </Button>
                 ) : null}
                 <Button
@@ -1113,33 +1110,90 @@ function FamilyDashboard({
                   disabled={Boolean(busy)}
                   onClick={() => void startSignedFlow('blend-supply')}
                 >
-                  Poner en Blend
+                  Poner a rendir
                 </Button>
                 <Button
                   variant="white"
                   disabled={Boolean(busy)}
                   onClick={() => void startSignedFlow('blend-withdraw')}
                 >
-                  Sacar de Blend
+                  Sacar del rendimiento
                 </Button>
               </div>
             </DashCard>
           ) : null}
         </DashCol>
         <DashCol>
-          <DashCard title="Wallets" hint="Quién puede depositar y quién firma retiros.">
+          <DashCard title="Movimientos" hint="Lo que llegó a la caja.">
+            {incoming.length === 0 ? (
+              <p className="dash-empty">Todavía no hay depósitos en esta caja.</p>
+            ) : (
+              <>
+                <div className="dash-feed">
+                  {(showAllMoves ? incoming : incoming.slice(0, 5)).map((item) => (
+                    <DashFeedItem
+                      key={item.id}
+                      fromLabel="De"
+                      from={movementLabel(item.from)}
+                      date={truncateKey(item.from, 4)}
+                      amount={formatAmount(item.amount, '')}
+                      code={displayAssetCode(item.assetCode)}
+                      href={explorerTxUrl(item.transactionHash)}
+                    />
+                  ))}
+                </div>
+                {incoming.length > 5 ? (
+                  <button
+                    type="button"
+                    className="dash-more"
+                    onClick={() => setShowAllMoves((open) => !open)}
+                  >
+                    {showAllMoves ? 'Ver menos' : 'Ver más'}
+                  </button>
+                ) : null}
+              </>
+            )}
+          </DashCard>
+          <DashCard title="Wallets" hint="Quién deposita y quién firma retiros.">
             <div className="dash-feed">
-              {poolMembers.map((member) => (
-                <DashFeedItem
-                  key={member.publicKey}
-                  from={member.publicKey === publicKey ? 'Vos' : 'Wallet'}
-                  date={truncateKey(member.publicKey, 5)}
-                  amount={walletPowerLabel(member.power)}
-                />
+              {(showAllWallets ? poolMembers : poolMembers.slice(0, 5)).map((member, index) => (
+                <div key={member.publicKey}>
+                  <DashFeedItem
+                    fromLabel="Persona"
+                    from={`${memberLabel(member.publicKey, index + 1)} — ${walletPowerLabel(member.power)}`}
+                    date={truncateKey(member.publicKey, 5)}
+                    amount=""
+                  />
+                  {youAreCreator && member.publicKey !== publicKey ? (
+                    <Field label="Apodo">
+                      <TextInput
+                        value={labels[member.publicKey] ?? ''}
+                        onChange={(event) => {
+                          setFamilyLabel(
+                            pool.poolAccount,
+                            member.publicKey,
+                            event.target.value,
+                          )
+                          setLabels(getFamilyLabels(pool.poolAccount))
+                        }}
+                        placeholder={`Wallet ${index + 1}`}
+                      />
+                    </Field>
+                  ) : null}
+                </div>
               ))}
             </div>
+            {poolMembers.length > 5 ? (
+              <button
+                type="button"
+                className="dash-more"
+                onClick={() => setShowAllWallets((open) => !open)}
+              >
+                {showAllWallets ? 'Ver menos' : 'Ver más'}
+              </button>
+            ) : null}
             {youAreCreator ? (
-              <div className="mt-4 space-y-2.5">
+              <div className="mt-3 space-y-2.5">
                 <Field label="Agregar wallet">
                   <TextInput
                     value={newSignerKey}
@@ -1176,10 +1230,10 @@ function FamilyDashboard({
 
 function pendingLabel(kind: PendingFamilyTx['kind']): string {
   if (kind === 'withdraw') return 'retiro'
-  if (kind === 'blend-supply') return 'aporte a Blend'
-  if (kind === 'trustline') return 'trustline'
+  if (kind === 'blend-supply') return 'aporte a rendimiento'
+  if (kind === 'trustline') return 'activar activo'
   if (kind === 'add-signer') return 'alta de wallet'
-  return 'rescate de Blend'
+  return 'rescate de rendimiento'
 }
 
 async function retryNotFound<T>(fn: () => Promise<T>): Promise<T> {

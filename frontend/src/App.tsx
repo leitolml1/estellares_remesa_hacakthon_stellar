@@ -10,6 +10,7 @@ import { PoolsHomePage } from './pages/PoolsHomePage'
 import { ProfilePage } from './pages/ProfilePage'
 import { ReceivePage } from './pages/ReceivePage'
 import { SendPage } from './pages/SendPage'
+import { TrackPage } from './pages/TrackPage'
 
 export default function App() {
   return (
@@ -21,6 +22,8 @@ export default function App() {
             <Route path="/enviar" element={<SendPage />} />
             <Route path="/recibir" element={<ReceivePage />} />
             <Route path="/historial" element={<HistoryPage />} />
+            <Route path="/track/:txHash" element={<TrackPage />} />
+            <Route path="/track" element={<TrackPage />} />
             <Route path="/pools" element={<PoolsHomePage />} />
             <Route path="/pools/nuevo" element={<CreatePoolPage />} />
             <Route path="/pools/:shortCode" element={<PoolDetailPage />} />

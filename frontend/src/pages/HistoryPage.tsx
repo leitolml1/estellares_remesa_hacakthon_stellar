@@ -1,34 +1,43 @@
 import { animate, stagger } from 'animejs'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FormPanel, PageStage } from '../components/layout/PageStage'
 import { WalletGate } from '../components/WalletGate'
 import { Alert } from '../components/ui/Alert'
 import { AssetLogo } from '../components/ui/AssetLogo'
 import { Button } from '../components/ui/Button'
-import { Field, TextInput, formControlClass } from '../components/ui/Field'
+import { Field, TextInput } from '../components/ui/Field'
 import { Spinner } from '../components/ui/Spinner'
 import { useUnfoldDown } from '../hooks/useUnfoldDown'
 import { useWallet } from '../context/WalletContext'
 import { getPaymentHistory, humanizeApiError } from '../lib/api'
-import { displayAssetCode } from '../lib/assets'
+import { displayAssetCode, type KnownAssetCode } from '../lib/assets'
+import { saveContact } from '../lib/contacts'
 import {
   explorerTxUrl,
   formatAmount,
   formatDate,
   truncateKey,
 } from '../lib/format'
+import { getFamilyLabels, getSavedFamilyPools } from '../lib/storage'
 import type { PaymentRecord } from '../types'
+
+const ASSET_FILTERS: Array<'all' | KnownAssetCode> = ['all', 'XLM', 'USDC', 'EURC']
+const TYPE_FILTERS: Array<{ id: 'all' | 'in' | 'out'; label: string }> = [
+  { id: 'all', label: 'Todos' },
+  { id: 'out', label: 'Enviados' },
+  { id: 'in', label: 'Recibidos' },
+]
 
 export function HistoryPage() {
   return (
     <PageStage
-      kicker="Módulo 1"
+      className="page-stage-history"
       title="HISTORIAL"
-      subtitle="Django lee Horizon y le pega la nota/categoría que hayas guardado."
+      subtitle="Tus envíos y lo que llegó, con la nota que hayas guardado."
     >
       <WalletGate
         title="Conectá para ver el historial"
-        description="Los montos salen del ledger. Las notas las guarda Django."
+        description="Los montos salen de la red. Las notas las guardamos nosotros."
       >
         <HistoryContent />
       </WalletGate>
@@ -42,11 +51,22 @@ function HistoryContent() {
   const [cursor, setCursor] = useState<string | null>(null)
   const [note, setNote] = useState('')
   const [direction, setDirection] = useState<'all' | 'in' | 'out'>('all')
-  const [asset, setAsset] = useState('')
+  const [asset, setAsset] = useState<'all' | KnownAssetCode>('all')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const reveal = useUnfoldDown('history')
   const tableRef = useRef<HTMLTableSectionElement>(null)
+  const nicknames = useMemo(() => collectNicknames(), [])
+  const [savedContacts, setSavedContacts] = useState<string[]>([])
+
+  function addContact(publicKey: string) {
+    const contact = saveContact(publicKey, nicknames[publicKey] ?? '')
+    if (contact) {
+      setSavedContacts((current) =>
+        current.includes(publicKey) ? current : [...current, publicKey],
+      )
+    }
+  }
 
   async function load(next?: string, replace = false) {
     if (!publicKey) return
@@ -76,7 +96,7 @@ function HistoryContent() {
   const filtered = records.filter((record) => {
     if (direction === 'in' && record.to !== publicKey) return false
     if (direction === 'out' && record.from !== publicKey) return false
-    if (asset && record.assetCode.toLowerCase() !== asset.toLowerCase()) {
+    if (asset !== 'all' && displayAssetCode(record.assetCode) !== asset) {
       return false
     }
     if (note.trim()) {
@@ -106,7 +126,6 @@ function HistoryContent() {
         className="grid gap-4 md:grid-cols-4"
         onSubmit={(event) => {
           event.preventDefault()
-          void load(undefined, true)
         }}
       >
         <Field label="Nota / categoría">
@@ -116,25 +135,35 @@ function HistoryContent() {
             placeholder="alquiler, familia…"
           />
         </Field>
-        <Field label="Dirección">
-          <select
-            className={formControlClass}
-            value={direction}
-            onChange={(event) =>
-              setDirection(event.target.value as 'all' | 'in' | 'out')
-            }
-          >
-            <option value="all">Todas</option>
-            <option value="in">Entrantes</option>
-            <option value="out">Salientes</option>
-          </select>
+        <Field label="Tipo">
+          <div className="history-filters" role="group" aria-label="Tipo de movimiento">
+            {TYPE_FILTERS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`history-chip ${direction === item.id ? 'is-active' : ''}`}
+                aria-pressed={direction === item.id}
+                onClick={() => setDirection(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </Field>
         <Field label="Asset">
-          <TextInput
-            value={asset}
-            onChange={(event) => setAsset(event.target.value)}
-            placeholder="XLM, USDC…"
-          />
+          <div className="history-filters" role="group" aria-label="Filtrar por activo">
+            {ASSET_FILTERS.map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={`history-chip ${asset === item ? 'is-active' : ''}`}
+                aria-pressed={asset === item}
+                onClick={() => setAsset(item)}
+              >
+                {item === 'all' ? 'Todos' : item}
+              </button>
+            ))}
+          </div>
         </Field>
         <div className="flex items-end">
           <Button type="submit" disabled={loading}>
@@ -166,15 +195,45 @@ function HistoryContent() {
             </tr>
           </thead>
           <tbody ref={tableRef}>
-            {filtered.map((record) => (
+            {filtered.map((record) => {
+              const counterpart =
+                record.from === publicKey ? record.to : record.from
+              const nickname = nicknames[counterpart]
+              const primary =
+                record.note?.trim() ||
+                record.memo?.trim() ||
+                nickname ||
+                truncateKey(counterpart, 5)
+              const showKey =
+                primary !== truncateKey(counterpart, 5)
+              return (
               <tr key={record.id} className="border-t border-purple/15">
                 <td className="py-3 pr-4">{formatDate(record.createdAt)}</td>
-                <td className="py-3 pr-4 font-mono text-xs">
-                  {record.from === publicKey ? '→' : '←'}{' '}
-                  {truncateKey(
-                    record.from === publicKey ? record.to : record.from,
-                    5,
-                  )}
+                <td className="py-3 pr-4">
+                  <div className="history-party">
+                    <span className="history-party-name">
+                      {record.from === publicKey ? '→' : '←'} {primary}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      {showKey ? (
+                        <span className="history-party-key" title={counterpart}>
+                          {truncateKey(counterpart, 5)}
+                        </span>
+                      ) : null}
+                      {savedContacts.includes(counterpart) ? (
+                        <span className="text-xs text-purple-deep/60">✓ contacto</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-xs text-purple underline"
+                          onClick={() => addContact(counterpart)}
+                          title="Guardar esta wallet en tu libreta de contactos"
+                        >
+                          + contacto
+                        </button>
+                      )}
+                    </span>
+                  </div>
                 </td>
                 <td className="py-3 pr-4">
                   <span className="inline-flex items-center gap-2">
@@ -202,7 +261,7 @@ function HistoryContent() {
                   </a>
                 </td>
               </tr>
-            ))}
+            )})}
           </tbody>
         </table>
       </div>
@@ -221,4 +280,12 @@ function HistoryContent() {
     </FormPanel>
     </div>
   )
+}
+
+function collectNicknames(): Record<string, string> {
+  const names: Record<string, string> = {}
+  for (const pool of getSavedFamilyPools()) {
+    Object.assign(names, getFamilyLabels(pool.poolAccount))
+  }
+  return names
 }

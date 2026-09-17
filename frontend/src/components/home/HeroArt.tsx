@@ -53,7 +53,7 @@ export function HeroArt() {
       </div>
 
       <span className="absolute bottom-10 left-10 text-3xl font-black tracking-[0.25em] text-white">
-        SEP-7
+        QR
       </span>
       <span className="doodle-grid absolute bottom-2 right-2 h-24 w-24" />
       <span className="absolute bottom-32 right-10 h-3 w-3 rotate-45 bg-yellow" />

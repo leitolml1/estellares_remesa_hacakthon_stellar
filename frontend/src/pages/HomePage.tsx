@@ -1,25 +1,25 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { FreighterCta } from '../components/FreighterCta'
 import { HeroArt } from '../components/home/HeroArt'
 import { StageAtmosphere } from '../components/layout/StageAtmosphere'
 import { StellarMark } from '../components/layout/StellarMark'
 import { Button } from '../components/ui/Button'
-import { AcceptedAssets } from '../components/ui/AssetLogo'
 import { useWallet } from '../context/WalletContext'
 import { usePageMotion } from '../hooks/usePageMotion'
 import { useRevealRow } from '../hooks/useRevealRow'
 
-const words = ['el mundo real', 'tu familia', 'tu comunidad', 'Stellar']
+const phrases = ['al mundo real', 'a tu familia', 'a tu comunidad']
 
 export function HomePage() {
-  const { publicKey, connect, connecting } = useWallet()
+  const { publicKey } = useWallet()
   const [wordIndex, setWordIndex] = useState(0)
   const root = usePageMotion('home')
   const features = useRevealRow()
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      setWordIndex((current) => (current + 1) % words.length)
+      setWordIndex((current) => (current + 1) % phrases.length)
     }, 2200)
     return () => window.clearInterval(id)
   }, [])
@@ -33,21 +33,18 @@ export function HomePage() {
         <div className="relative z-10 grid items-center gap-8 lg:grid-cols-[1fr_1.05fr]">
           <div>
             <p className="anim-enter text-xs font-semibold uppercase tracking-[0.22em] text-yellow">
-              Testnet Stellar
+              Plata que llega
             </p>
-            <h1 className="anim-enter mt-4 text-5xl font-black leading-[0.92] tracking-tight sm:text-7xl">
-              REMESAS
-              <br />
-              QUE LLEGAN
-              <br />
-              <span className="text-purple">{words[wordIndex].toUpperCase()}</span>
+            <h1 className="anim-enter mt-4 text-4xl font-black leading-[1.02] tracking-tight sm:text-6xl">
+              Remesas que llegan{' '}
+              <span className="text-purple">{phrases[wordIndex]}</span>
             </h1>
-            <p className="anim-enter mt-6 max-w-md text-sm leading-7 text-white/65">
-              Enviá XLM, USDC o EURC, recibí con QR y juntá un pool. La
-              private key nunca sale de Freighter.
+            <p className="anim-enter mt-6 max-w-lg text-base leading-7 text-white/75">
+              Enviá plata que llega en segundos. Recibí con un QR. Juntá un
+              pool con tu comunidad o tu familia. Tu clave nunca sale de tu
+              billetera.
             </p>
-            <div className="anim-enter mt-5 space-y-3">
-              <AcceptedAssets tone="dark" />
+            <div className="anim-enter mt-5">
               <StellarMark
                 size={20}
                 tone="dark"
@@ -58,12 +55,10 @@ export function HomePage() {
             <div className="anim-enter mt-6 flex flex-wrap items-center gap-3">
               {publicKey ? (
                 <Link to="/enviar">
-                  <Button>Enviar ahora →</Button>
+                  <Button>Empezar →</Button>
                 </Link>
               ) : (
-                <Button onClick={() => void connect()} disabled={connecting}>
-                  {connecting ? 'Conectando…' : 'Empezar →'}
-                </Button>
+                <FreighterCta tone="dark" label="Empezar →" />
               )}
             </div>
             <div className="anim-enter mt-7">
@@ -71,9 +66,9 @@ export function HomePage() {
                 Qué podés hacer
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Tag to="/enviar" label="Pago directo" tone="yellow" />
-                <Tag to="/pools" label="Pool comunitario" tone="purple" />
-                <Tag to="/familia" label="Pool familiar" tone="white" />
+                <Tag to="/enviar" label="Pago directo" />
+                <Tag to="/pools" label="Pool comunitario" />
+                <Tag to="/familia" label="Pool familiar" />
               </div>
             </div>
           </div>
@@ -86,48 +81,46 @@ export function HomePage() {
       <section ref={features} className="grid gap-4 sm:grid-cols-3">
         <Feature
           title="Para quien envía"
-          body="Path payment con destMin. Si falta trustline, te avisamos antes de firmar."
+          body="Mandás el monto y llega aunque cambie el tipo de cambio del camino."
           to="/enviar"
         />
         <Feature
           title="Para la comunidad"
-          body="Un QR SEP-7 en XLM, USDC o EURC. Cualquier wallet puede donar."
+          body="Un link o QR para que cualquiera aporte, sin registrarse."
           to="/pools"
         />
         <Feature
           title="Para la familia"
-          body="Multisig nativo, límite de retiro y Blend. Django arma el XDR; Freighter firma."
+          body="Caja compartida: varios pueden depositar; los retiros piden más de una firma."
           to="/familia"
         />
       </section>
 
       <section className="grid gap-4 sm:grid-cols-3">
-        <Stat label="Settlement" value="~5 s" note="Horizon testnet" />
-        <Stat label="Memo" value="28 B" note="shortCode del pool" />
-        <Stat label="Firma" value="0 keys" note="solo XDR firmado" />
+        <Stat label="Velocidad" value="~5 s" note="Llega en segundos" />
+        <Stat label="Tu clave" value="Queda" note="Sin compartir tu clave" />
+        <Stat label="Firma" value="Vos" note="Firma en tu billetera" />
       </section>
+
+      <details className="rounded-[28px] border border-line bg-white px-6 py-5">
+        <summary className="cursor-pointer text-sm font-semibold text-purple-deep">
+          Cómo funciona por dentro
+        </summary>
+        <p className="mt-3 text-sm leading-6 text-muted">
+          El navegador arma la transacción, tu billetera Freighter la firma y
+          la red Stellar la confirma. Los pools comunitarios y la caja familiar
+          usan esa misma firma: tu clave no sale del navegador.
+        </p>
+      </details>
     </div>
   )
 }
 
-function Tag({
-  to,
-  label,
-  tone,
-}: {
-  to: string
-  label: string
-  tone: 'yellow' | 'purple' | 'white'
-}) {
-  const tones = {
-    yellow: 'bg-yellow text-ink',
-    purple: 'bg-purple text-white',
-    white: 'bg-white text-ink',
-  }
+function Tag({ to, label }: { to: string; label: string }) {
   return (
     <Link
       to={to}
-      className={`rounded-full px-4 py-2 text-xs font-bold tracking-wide ${tones[tone]}`}
+      className="rounded-full border border-white/20 bg-transparent px-4 py-2 text-xs font-bold tracking-wide text-white hover:bg-white/10"
     >
       {label}
     </Link>

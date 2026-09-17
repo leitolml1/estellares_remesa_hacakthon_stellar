@@ -31,6 +31,7 @@ class PoolSerializer(serializers.ModelSerializer):
             "wallet_address",
             "title",
             "goal_amount",
+            "deadline",
             "creator",
             "vault_registered",
             "created_at",
@@ -41,7 +42,7 @@ class PoolSerializer(serializers.ModelSerializer):
 class PoolCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Pool
-        fields = ["wallet_address", "title", "goal_amount", "creator"]
+        fields = ["wallet_address", "title", "goal_amount", "deadline", "creator"]
 
     def validate_wallet_address(self, value: str) -> str:
         return _validate_stellar_public_key(value)

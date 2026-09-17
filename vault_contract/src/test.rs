@@ -314,3 +314,90 @@ fn el_owner_se_ve_en_pool_info() {
     assert_eq!(info.initial_equivalent, 45i128);
     assert_eq!(info.equivalent_total, 45i128);
 }
+
+#[test]
+fn el_leaderboard_ordena_por_equivalente_desc() {
+    let env = Env::default();
+    env.cost_estimate().budget().reset_unlimited();
+    let s = setup_vault(&env);
+
+    let owner = Address::generate(&env);
+    let donante_chico = Address::generate(&env);
+    let donante_grande = Address::generate(&env);
+    StellarAssetClient::new(&env, &s.xlm_like)
+        .mock_all_auths()
+        .mint(&donante_chico, &1_000_000_000i128);
+    StellarAssetClient::new(&env, &s.usdc_like)
+        .mock_all_auths()
+        .mint(&donante_chico, &1_000i128);
+    StellarAssetClient::new(&env, &s.usdc_like)
+        .mock_all_auths()
+        .mint(&donante_grande, &1_000i128);
+
+    let code = short_code(&env);
+    s.client
+        .mock_all_auths()
+        .create_pool(&code, &owner, &0, &0);
+
+    // donante_chico: 100 unidades XLM (equiv 100) + 2 USDC (equiv 20) = 120.
+    s.client
+        .mock_all_auths()
+        .deposit(&code, &donante_chico, &s.xlm_like, &100i128);
+    s.client
+        .mock_all_auths()
+        .deposit(&code, &donante_chico, &s.usdc_like, &2i128);
+    // donante_grande: 50 USDC * tasa 10 = 500 XLM-equivalente.
+    s.client
+        .mock_all_auths()
+        .deposit(&code, &donante_grande, &s.usdc_like, &50i128);
+
+    let donors = s.client.donors(&code);
+    assert_eq!(donors.len(), 2);
+    assert_eq!(donors.get(0).unwrap().0, donante_grande);
+    assert_eq!(donors.get(0).unwrap().1, 500i128);
+    assert_eq!(donors.get(1).unwrap().0, donante_chico);
+    // 100 (XLM) + 20 (2 USDC) = 120, aportes suman aunque sean en assets
+    // distintos.
+    assert_eq!(donors.get(1).unwrap().1, 120i128);
+}
+
+#[test]
+fn retirar_no_baja_el_leaderboard() {
+    let env = Env::default();
+    env.cost_estimate().budget().reset_unlimited();
+    let s = setup_vault(&env);
+
+    let owner = Address::generate(&env);
+    let donor = Address::generate(&env);
+    let outsider = Address::generate(&env);
+    StellarAssetClient::new(&env, &s.xlm_like)
+        .mock_all_auths()
+        .mint(&donor, &100i128);
+
+    let code = short_code(&env);
+    s.client
+        .mock_all_auths()
+        .create_pool(&code, &owner, &0, &0);
+    s.client
+        .mock_all_auths()
+        .deposit(&code, &donor, &s.xlm_like, &100i128);
+    s.client
+        .mock_all_auths()
+        .withdraw(&code, &owner, &s.xlm_like, &outsider, &60i128);
+
+    let donors = s.client.donors(&code);
+    assert_eq!(donors.len(), 1);
+    assert_eq!(donors.get(0).unwrap().0, donor);
+    assert_eq!(donors.get(0).unwrap().1, 100i128);
+}
+
+#[test]
+fn pool_inexistente_da_leaderboard_vacio() {
+    let env = Env::default();
+    env.cost_estimate().budget().reset_unlimited();
+    let s = setup_vault(&env);
+
+    let otro = String::from_str(&env, "noExiste12");
+    let donors = s.client.mock_all_auths().donors(&otro);
+    assert_eq!(donors.len(), 0);
+}

@@ -40,6 +40,10 @@ pub struct Pool {
     /// podria retirar lo donado a OTRO pool: el retiro se limita a lo
     /// donado a este pool en particular.
     pub withdrawn: Map<Address, i128>,
+    /// Acumulado donado POR DONANTE, en XLM-equivalente (Address del
+    /// donante -> equivalente). Es para el leaderboard del pool y nunca
+    /// baja al retirar.
+    pub donors: Map<Address, i128>,
 }
 
 #[contracttype]
@@ -125,6 +129,7 @@ impl CommunityVault {
                 initial_equivalent,
                 donated: Map::new(&env),
                 withdrawn: Map::new(&env),
+                donors: Map::new(&env),
             },
         );
         env.storage().instance().extend_ttl(INSTANCE_TTL, INSTANCE_TTL);
@@ -138,7 +143,7 @@ impl CommunityVault {
             panic!("el monto tiene que ser mayor a 0");
         }
         donor.require_auth();
-        let _rate = rate_for(&env, &asset);
+        let rate = rate_for(&env, &asset);
 
         let mut pool = get_pool(&env, &short_code);
         if pool.owner == donor {
@@ -153,6 +158,8 @@ impl CommunityVault {
 
         let donated = pool.donated.get(asset.clone()).unwrap_or(0) + amount;
         pool.donated.set(asset.clone(), donated);
+        let donor_equivalent = pool.donors.get(donor.clone()).unwrap_or(0) + amount * rate;
+        pool.donors.set(donor.clone(), donor_equivalent);
         let mut pools: Map<String, Pool> = env
             .storage()
             .instance()
@@ -242,6 +249,21 @@ impl CommunityVault {
             assets,
         }
     }
+
+    /// Leaderboard del pool: (donante, XLM-equivalente acumulado), ordenado
+    /// de mayor a menor aporte. Nunca baja al retirar. Un pool que no existe
+    /// devuelve un vec vacio (no trappea, para que la consulta sea simple).
+    pub fn donors(env: Env, short_code: String) -> Vec<(Address, i128)> {
+        let pools: Map<String, Pool> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Pools)
+            .unwrap_or_else(|| Map::new(&env));
+        match pools.get(short_code) {
+            Some(pool) => donors_sorted_desc(&env, &pool.donors),
+            None => Vec::new(&env),
+        }
+    }
 }
 
 fn rate_for(env: &Env, asset: &Address) -> i128 {
@@ -277,4 +299,28 @@ fn equivalent_of(env: &Env, pool: &Pool) -> i128 {
         equivalent += donated * rates.get(asset.clone()).unwrap_or(0);
     }
     equivalent
+}
+
+fn donors_sorted_desc(env: &Env, donated_by_donor: &Map<Address, i128>) -> Vec<(Address, i128)> {
+    let mut entries: Vec<(Address, i128)> = Vec::new(env);
+    for (donor, equivalent) in donated_by_donor.iter() {
+        entries.push_back((donor, equivalent));
+    }
+    // Orden por insercion desc por equivalente (el Vec de soroban no trae sort).
+    let len = entries.len();
+    for i in 0..len {
+        let mut j = i;
+        while j > 0 {
+            let prev = entries.get(j - 1).unwrap();
+            let curr = entries.get(j).unwrap();
+            if prev.1 < curr.1 {
+                entries.set(j - 1, curr);
+                entries.set(j, prev);
+                j -= 1;
+            } else {
+                break;
+            }
+        }
+    }
+    entries
 }

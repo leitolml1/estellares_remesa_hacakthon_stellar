@@ -31,6 +31,7 @@ from .vault_client import (
     build_create_pool_tx,
     build_deposit_tx,
     build_withdraw_tx,
+    get_vault_leaderboard,
     get_vault_state,
     parse_invoke,
     submit_vault_tx,
@@ -83,6 +84,7 @@ class PoolCreateView(APIView):
             wallet_address=data["wallet_address"],
             title=data["title"],
             goal_amount=data.get("goal_amount") or None,
+            deadline=data.get("deadline"),
             creator=data["creator"],
             donations_synced_cursor=initial_cursor,
         )
@@ -463,3 +465,23 @@ class VaultStateView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         return Response(state)
+
+
+class VaultLeaderboardView(APIView):
+    """GET /api/pools/<short_code>/vault/leaderboard/
+
+    Top donantes del pool, leido del mapa `donors` del contrato Soroban
+    (XLM-equivalente acumulado por donante, nunca baja al retirar). Sin
+    guard a proposito: es data publica del pool.
+    """
+
+    def get(self, request, short_code: str):
+        get_object_or_404(Pool, short_code=short_code)
+        try:
+            donors = get_vault_leaderboard(short_code)
+        except VaultUnavailableError:
+            return Response(
+                {"detail": "El servicio de Soroban RPC no esta disponible, reintenta en unos segundos."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({"donors": donors})
