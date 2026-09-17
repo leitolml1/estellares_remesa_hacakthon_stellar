@@ -18,8 +18,8 @@ segundos, y soporte nativo para stablecoins (USDC/EURC de Circle), multisig
 de cuenta y contratos inteligentes (Soroban) — todo lo que necesitábamos para
 los tres módulos sin tener que montar infraestructura propia de custodia.
 
-- **API en producción (Render)**: `<COMPLETAR: URL de Render>`
-- **Frontend en producción**: `<COMPLETAR: URL si está deployado>`
+- **API en producción (Render)**: https://estellares-remesa-hacakthon-stellar.onrender.com
+- **Frontend en producción (Vercel)**: https://frontend-estellares.vercel.app/
 - **Red**: Stellar Testnet (Horizon + Soroban RPC)
 
 ## Los tres módulos (los 3 completos y probados en vivo contra testnet)
