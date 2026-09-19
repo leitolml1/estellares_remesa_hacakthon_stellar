@@ -272,7 +272,12 @@ class VaultViewTests(APITestCase):
         if registered and not self.pool.vault_registered:
             self.pool.vault_registered = True
             self.pool.save(update_fields=["vault_registered"])
-        with mock.patch.object(pool_views, "build_deposit_tx", return_value="xdr-dep") as build:
+        with mock.patch.object(pool_views, "build_deposit_tx", return_value="xdr-dep") as build, \
+                mock.patch.object(
+                    pool_views,
+                    "get_vault_state",
+                    return_value={"registered": True, "complete": False},
+                ):
             response = self.client.post(
                 reverse("pool-vault-deposit-build", args=[self.pool.short_code]),
                 {"donor_public_key": donor, "asset_code": asset_code, "amount": amount},
@@ -297,6 +302,24 @@ class VaultViewTests(APITestCase):
         response, build = self._deposit(DONOR)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["xdr"], "xdr-dep")
+
+    def test_deposit_rechaza_si_la_meta_esta_completa(self):
+        self.pool.vault_registered = True
+        self.pool.save(update_fields=["vault_registered"])
+        with mock.patch.object(pool_views, "build_deposit_tx", return_value="xdr-dep") as build, \
+                mock.patch.object(
+                    pool_views,
+                    "get_vault_state",
+                    return_value={"registered": True, "complete": True},
+                ):
+            response = self.client.post(
+                reverse("pool-vault-deposit-build", args=[self.pool.short_code]),
+                {"donor_public_key": DONOR, "asset_code": "XLM", "amount": "5"},
+                format="json",
+            )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Meta alcanzada", response.json()["detail"])
+        build.assert_not_called()
 
     def _withdraw(self, owner, registered=True, amount="5", state_assets=None):
         if registered and not self.pool.vault_registered:

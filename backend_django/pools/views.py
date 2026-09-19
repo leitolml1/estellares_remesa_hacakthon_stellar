@@ -278,6 +278,16 @@ class VaultDepositBuildView(APIView):
             )
 
         try:
+            vault_state = get_vault_state(pool.short_code)
+        except VaultUnavailableError:
+            vault_state = None
+        if vault_state and vault_state.get("complete"):
+            return Response(
+                {"detail": "Meta alcanzada: ya no se puede donar a este pool."},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        try:
             xdr = build_deposit_tx(
                 pool.short_code,
                 data["donor_public_key"],

@@ -40,7 +40,6 @@ import {
   TESTNET_NETWORK_PASSPHRASE,
   explorerTxUrl,
   formatAmount,
-  formatDate,
   fullAmountTitle,
   isStellarAmount,
   isStellarPublicKey,
@@ -91,6 +90,7 @@ function PoolDetailContent({
   const [vaultBusy, setVaultBusy] = useState<string | null>(null)
   const [vaultError, setVaultError] = useState<string | null>(null)
   const [vaultOk, setVaultOk] = useState<string | null>(null)
+  const [vaultHash, setVaultHash] = useState<string | null>(null)
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawDestination, setWithdrawDestination] = useState('')
   const [actionTab, setActionTab] = useState<'donate' | 'withdraw' | 'share'>('donate')
@@ -270,10 +270,24 @@ function PoolDetailContent({
     }
   }, [pool, assetCode])
 
-  // Fuente de verdad pública: progress + completed de la API.
-  // No usar goal_amount como recaudado ni vault.complete para el estado.
-  const completed = detail?.progress.completed === true
-  const xlmRaised = useMemo(() => {
+  // Fuente de verdad: para pools del vault el progreso vive on-chain
+  // (equivalent_total / complete). Horizon solo ve pagos a la wallet, y
+  // las donaciones nuevas van al contrato — por eso la barra quedaba en 0.
+  const youArePoolWallet = Boolean(publicKey && pool && publicKey === pool.walletPublicKey)
+  const selfDonation = Boolean(
+    publicKey && pool && (publicKey === pool.creator || publicKey === pool.walletPublicKey),
+  )
+  const vaultRaised = useMemo(() => {
+    if (vault?.equivalentTotal != null && vault.equivalentTotal !== '') {
+      const n = Number(vault.equivalentTotal)
+      if (Number.isFinite(n)) return n
+    }
+    if (leaderboard && leaderboard.length > 0) {
+      return leaderboard.reduce((sum, entry) => sum + Number(entry.donatedXlmEquivalent || 0), 0)
+    }
+    return null
+  }, [vault, leaderboard])
+  const horizonRaised = useMemo(() => {
     if (detail?.progress.xlmEquivalentTotal != null) {
       return Number(detail.progress.xlmEquivalentTotal)
     }
@@ -282,18 +296,23 @@ function PoolDetailContent({
     )
     return Number(xlm?.total ?? 0)
   }, [detail])
-  const goal = pool?.goalAmount ? Number(pool.goalAmount) : 0
+  const xlmRaised = poolRegistered && vaultRaised != null ? vaultRaised : horizonRaised
+  const goal = pool?.goalAmount
+    ? Number(pool.goalAmount)
+    : vault?.goal
+      ? Number(vault.goal)
+      : 0
+  const completed = Boolean(
+    vault?.complete ||
+      detail?.progress.completed ||
+      (goal > 0 && xlmRaised >= goal),
+  )
   const remaining = goal > 0 ? Math.max(0, goal - xlmRaised) : 0
   const progress = completed
     ? 100
     : goal > 0
       ? Math.min(99.9, Math.max(0, (xlmRaised / goal) * 100))
       : 0
-  const empty =
-    !completed &&
-    xlmRaised <= 0 &&
-    (detail?.progress.donationCount ?? 0) === 0 &&
-    donations.length === 0
   // Deadline informativo: las reglas de cierre reales viven on-chain.
   let deadlineLabel: string | undefined
   if (pool?.deadline && !completed) {
@@ -332,10 +351,6 @@ function PoolDetailContent({
   }).filter((item) => Number(item.amount) > 0)
   const canOpenTrustline = Boolean(
     publicKey && pool && publicKey === pool.walletPublicKey && selectedAsset?.issuer,
-  )
-  const youArePoolWallet = Boolean(publicKey && pool && publicKey === pool.walletPublicKey)
-  const selfDonation = Boolean(
-    publicKey && pool && (publicKey === pool.creator || publicKey === pool.walletPublicKey),
   )
 
   // Leaderboard: on-chain para pools vault, agregado client-side (sobre los
@@ -405,6 +420,10 @@ function PoolDetailContent({
     if (!publicKey || !pool || !selectedAsset) return
     if (publicKey === pool.creator || publicKey === pool.walletPublicKey) {
       setError('Creaste este pool: no podés donarte a vos mismo.')
+      return
+    }
+    if (completed) {
+      setError('Meta alcanzada: ya no se puede donar.')
       return
     }
     if (!suggestedAmount) {
@@ -507,6 +526,7 @@ function PoolDetailContent({
     try {
       setVaultError(null)
       setVaultOk(null)
+      setVaultHash(null)
       setVaultBusy('Armando el retiro…')
       const { xdr } = await buildVaultWithdraw(shortCode, {
         owner_public_key: publicKey,
@@ -522,7 +542,8 @@ function PoolDetailContent({
       )
       setVaultBusy('Enviando a Soroban…')
       const result = await submitVaultTx(shortCode, signed.signedXdr)
-      setVaultOk(`Retiro confirmado. ${truncateKey(result.hash, 4)}`)
+      setVaultOk('Retiro confirmado.')
+      setVaultHash(result.hash)
       setWithdrawAmount('')
       await refreshVaultData()
       void refreshBalances()
@@ -569,7 +590,7 @@ function PoolDetailContent({
     </div>
   )
   const tabs = [
-    ...(!completed ? [{ id: 'donate' as const, label: 'Aportar' }] : []),
+    ...(!completed && !selfDonation ? [{ id: 'donate' as const, label: 'Aportar' }] : []),
     ...(pool.vaultRegistered && youArePoolWallet
       ? [{ id: 'withdraw' as const, label: 'Retirar' }]
       : []),
@@ -577,8 +598,8 @@ function PoolDetailContent({
   ]
   const activeTab = tabs.some((tab) => tab.id === actionTab)
     ? actionTab
-    : completed
-      ? 'share'
+    : youArePoolWallet && pool.vaultRegistered
+      ? 'withdraw'
       : tabs[0].id
 
   return (
@@ -605,35 +626,17 @@ function PoolDetailContent({
                 : undefined
             }
           />
-          <DashCard title="Aportes">
-            {donations.length === 0 ? (
-              <p className="dash-empty">
-                {empty ? 'Todavía no hay aportes.' : 'Todavía no hay movimientos para mostrar.'}
-              </p>
+          <DashCard
+            title="Top donantes"
+            hint={
+              poolRegistered
+                ? 'Aportes acumulados en XLM equivalente, leídos on-chain del vault.'
+                : 'Agregado sobre los últimos aportes entrantes, en XLM equivalente.'
+            }
+          >
+            {topDonors.length === 0 ? (
+              <p className="dash-empty">Todavía no hay aportes.</p>
             ) : (
-              <div id="movimientos" className="dash-feed">
-                {donations.map((item) => (
-                  <DashFeedItem
-                    key={item.id}
-                    from={truncateKey(item.from, 4)}
-                    date={formatDate(item.createdAt)}
-                    amount={formatAmount(item.amount, '')}
-                    code={displayAssetCode(item.assetCode)}
-                    href={explorerTxUrl(item.transactionHash)}
-                  />
-                ))}
-              </div>
-            )}
-          </DashCard>
-          {topDonors.length > 0 ? (
-            <DashCard
-              title="Top donantes"
-              hint={
-                poolRegistered
-                  ? 'Aportes acumulados en XLM equivalente, leidos on-chain del vault.'
-                  : 'Agregado sobre los últimos aportes entrantes, en XLM equivalente.'
-              }
-            >
               <div className="dash-feed">
                 {topDonors.map((donor, index) => (
                   <DashFeedItem
@@ -644,8 +647,8 @@ function PoolDetailContent({
                   />
                 ))}
               </div>
-            </DashCard>
-          ) : null}
+            )}
+          </DashCard>
         </DashCol>
         <DashCol>
           <DashCard
@@ -659,13 +662,20 @@ function PoolDetailContent({
                     : 'Aportar'
             }
             hint={
-              activeTab === 'withdraw'
-                ? 'Retirá al momento, firmando con la wallet del pool.'
-                : activeTab === 'share'
-                  ? 'Cualquiera aporta con el link, sin registrarse.'
-                  : 'Elegí el activo y el monto. Tu billetera firma el depósito.'
+              completed
+                ? 'Meta alcanzada: ya no se puede donar.'
+                : activeTab === 'withdraw'
+                  ? 'Retirá al momento, firmando con la wallet del pool.'
+                  : activeTab === 'share'
+                    ? 'Cualquiera aporta con el link, sin registrarse.'
+                    : 'Elegí el activo y el monto. Tu billetera firma el depósito.'
             }
           >
+            {completed ? (
+              <div className="mb-3">
+                <Alert tone="ok">Meta alcanzada: ya no se puede donar.</Alert>
+              </div>
+            ) : null}
             <div className="dash-tabs" role="tablist">
               {tabs.map((tab) => (
                 <button
@@ -702,7 +712,24 @@ function PoolDetailContent({
                   </Alert>
                 ) : null}
                 {error ? <Alert tone="error">{error}</Alert> : null}
-                {ok ? <Alert tone="ok">{ok}</Alert> : null}
+                {ok ? (
+                  <Alert tone="ok">
+                    {ok}
+                    {donationHash ? (
+                      <>
+                        {' '}
+                        <a
+                          className="tx-link"
+                          href={explorerTxUrl(donationHash)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Ver en testnet
+                        </a>
+                      </>
+                    ) : null}
+                  </Alert>
+                ) : null}
                 {donationStatus !== 'idle' ? (
                   <TxStepper status={donationStatus} />
                 ) : busy ? (
@@ -760,7 +787,24 @@ function PoolDetailContent({
                   />
                 </Field>
                 {vaultError ? <Alert tone="error">{vaultError}</Alert> : null}
-                {vaultOk ? <Alert tone="ok">{vaultOk}</Alert> : null}
+                {vaultOk ? (
+                  <Alert tone="ok">
+                    {vaultOk}
+                    {vaultHash ? (
+                      <>
+                        {' '}
+                        <a
+                          className="tx-link"
+                          href={explorerTxUrl(vaultHash)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Ver en testnet
+                        </a>
+                      </>
+                    ) : null}
+                  </Alert>
+                ) : null}
                 {vaultBusy ? <Spinner label={vaultBusy} /> : null}
                 <Button disabled={Boolean(vaultBusy)} onClick={() => void withdrawFromVault()}>
                   Retirar

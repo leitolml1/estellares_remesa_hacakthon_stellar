@@ -12,8 +12,8 @@ export function Footer() {
         <div className="relative z-10 mx-auto grid max-w-6xl gap-8 px-6 py-10 sm:grid-cols-2 sm:px-10 lg:grid-cols-4">
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <StarMark className="h-6 w-6" />
-              <span className="text-sm font-semibold">Remesa Directa</span>
+              <StarMark className="h-8 w-11" />
+              <span className="text-sm font-semibold">Estelares</span>
             </div>
             <p className="text-sm leading-6 text-white/60">
               Remesas, pools comunitarios y ahorro familiar sobre Stellar

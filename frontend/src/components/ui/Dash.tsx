@@ -80,15 +80,25 @@ export function DashHero({
 export function DashCard({
   title,
   hint,
+  icon,
+  extra,
   children,
 }: {
   title: string
   hint?: string
+  icon?: ReactNode
+  extra?: ReactNode
   children: ReactNode
 }) {
   return (
     <section className="dash-card">
-      <h2 className="dash-card-title">{title}</h2>
+      <div className="dash-card-head">
+        <h2 className="dash-card-title">
+          {icon ? <span className="dash-card-icon">{icon}</span> : null}
+          {title}
+        </h2>
+        {extra}
+      </div>
       {hint ? <p className="dash-card-hint">{hint}</p> : null}
       {children}
     </section>

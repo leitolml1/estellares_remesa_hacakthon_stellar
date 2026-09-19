@@ -76,13 +76,13 @@ export function Navbar() {
       <div className="site-nav mx-auto max-w-7xl" ref={navRef}>
         <div className="relative z-10 flex items-center gap-2 px-3 py-1.5 sm:px-4">
           <NavLink to="/" className="flex shrink-0 items-center gap-2.5 pl-0.5">
-            <StarMark />
+            <StarMark tone="light" />
             <span className="hidden leading-none sm:block">
               <span className="block text-[10px] font-bold uppercase tracking-[0.22em] text-purple">
-                Remesa
+                Estelares
               </span>
               <span className="mt-0.5 block text-sm font-semibold tracking-tight text-ink">
-                Directa
+                Remesas
               </span>
             </span>
           </NavLink>

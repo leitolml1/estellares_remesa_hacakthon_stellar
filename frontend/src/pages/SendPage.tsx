@@ -276,33 +276,34 @@ function SendForm() {
               inputMode="decimal"
             />
           </Field>
-          <div className="sm:col-span-2">
+          <div className="send-assets sm:col-span-2">
             <Field label="Enviás">
               <AssetChips value={sendCode} onChange={setSendCode} />
             </Field>
-          </div>
-          <div className="sm:col-span-2">
+            <span className="send-assets-arrow" aria-hidden="true">
+              →
+            </span>
             <Field label="Recibe">
               <AssetChips
                 value={destCode}
                 onChange={(code) => setDestCode(code)}
               />
-              <p className="mt-2 text-sm text-white/55">
-                {crossAsset
-                  ? quoteLoading
-                    ? 'Buscando el mejor camino de conversión…'
-                    : quote
-                      ? `Tasa: 1 ${sendCode} ≈ ${quote.rate} ${destCode} (${
-                          quote.source === 'dex'
-                            ? 'camino on-chain'
-                            : quote.source === 'reference'
-                              ? 'tasa referencial'
-                              : 'directo'
-                        }) · mínimo que recibe: ${formatAmount(quote.destMin, destCode)}`
-                      : null
-                  : 'Mismo activo: el destinatario recibe lo que enviás.'}
-              </p>
             </Field>
+            <p className="send-assets-hint">
+              {crossAsset
+                ? quoteLoading
+                  ? 'Buscando el mejor camino de conversión…'
+                  : quote
+                    ? `Tasa: 1 ${sendCode} ≈ ${quote.rate} ${destCode} (${
+                        quote.source === 'dex'
+                          ? 'camino on-chain'
+                          : quote.source === 'reference'
+                            ? 'tasa referencial'
+                            : 'directo'
+                      }) · mínimo que recibe: ${formatAmount(quote.destMin, destCode)}`
+                    : null
+                : 'Mismo activo: el destinatario recibe lo que enviás.'}
+            </p>
           </div>
           {crossAsset && amountValid && quote ? (
             <div className="sm:col-span-2">

@@ -6,6 +6,7 @@ import { Alert } from '../components/ui/Alert'
 import { AssetLogo } from '../components/ui/AssetLogo'
 import { Button } from '../components/ui/Button'
 import { Field, TextInput } from '../components/ui/Field'
+import { IconExternal, IconFilter, IconReceive, IconSend } from '../components/ui/Icons'
 import { Spinner } from '../components/ui/Spinner'
 import { useUnfoldDown } from '../hooks/useUnfoldDown'
 import { useWallet } from '../context/WalletContext'
@@ -32,8 +33,8 @@ export function HistoryPage() {
   return (
     <PageStage
       className="page-stage-history"
-      title="HISTORIAL"
-      subtitle="Tus envíos y lo que llegó, con la nota que hayas guardado."
+      title="Historial de movimientos"
+      subtitle="Tus envíos y lo que llegó, con la nota que hayas guardado. Montos leídos de la red Stellar."
     >
       <WalletGate
         title="Conectá para ver el historial"
@@ -106,6 +107,30 @@ function HistoryContent() {
     return true
   })
 
+  const summary = useMemo(() => {
+    if (!publicKey) {
+      return { monthCount: 0, xlmIn: 0, xlmOut: 0 }
+    }
+    const now = new Date()
+    const monthRecords = records.filter((record) => {
+      const date = new Date(record.createdAt)
+      return (
+        date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()
+      )
+    })
+    let xlmIn = 0
+    let xlmOut = 0
+    for (const record of monthRecords) {
+      const code = displayAssetCode(record.assetCode)
+      if (code !== 'XLM') continue
+      const amount = Number(record.amount)
+      if (!Number.isFinite(amount)) continue
+      if (record.to === publicKey) xlmIn += amount
+      if (record.from === publicKey) xlmOut += amount
+    }
+    return { monthCount: monthRecords.length, xlmIn, xlmOut }
+  }, [publicKey, records])
+
   useLayoutEffect(() => {
     const rows = tableRef.current?.querySelectorAll('tr')
     if (!rows || rows.length === 0) return
@@ -128,11 +153,11 @@ function HistoryContent() {
           event.preventDefault()
         }}
       >
-        <Field label="Nota / categoría">
+        <Field label="Nota / categoría / dirección">
           <TextInput
             value={note}
             onChange={(event) => setNote(event.target.value)}
-            placeholder="alquiler, familia…"
+            placeholder="alquiler, familia, G…"
           />
         </Field>
         <Field label="Tipo">
@@ -150,7 +175,7 @@ function HistoryContent() {
             ))}
           </div>
         </Field>
-        <Field label="Asset">
+        <Field label="Activo">
           <div className="history-filters" role="group" aria-label="Filtrar por activo">
             {ASSET_FILTERS.map((item) => (
               <button
@@ -167,10 +192,31 @@ function HistoryContent() {
         </Field>
         <div className="flex items-end">
           <Button type="submit" disabled={loading}>
-            Aplicar
+            <span className="inline-flex items-center gap-2">
+              <IconFilter className="h-4 w-4" />
+              Filtrar
+            </span>
           </Button>
         </div>
       </form>
+
+      <div className="history-strip">
+        <div>
+          <p>Este mes</p>
+          <strong>{summary.monthCount}</strong>
+          <span>movimientos</span>
+        </div>
+        <div>
+          <p>Vol. recibido</p>
+          <strong className="is-in">+{formatAmount(String(summary.xlmIn), 'XLM')}</strong>
+          <span>solo XLM este mes</span>
+        </div>
+        <div>
+          <p>Vol. enviado</p>
+          <strong className="is-out">-{formatAmount(String(summary.xlmOut), 'XLM')}</strong>
+          <span>solo XLM este mes</span>
+        </div>
+      </div>
 
       {error ? (
         <div className="mt-6">
@@ -183,7 +229,12 @@ function HistoryContent() {
         </div>
       ) : null}
 
-      <div className="mt-8 overflow-x-auto">
+      <div className="history-meta">
+        <p>Mostrando {filtered.length} operaciones recientes</p>
+        <p>Montos leídos de Horizon · notas nuestras</p>
+      </div>
+
+      <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-base">
           <thead className="text-sm uppercase tracking-[0.12em] text-purple-deep/70">
             <tr>
@@ -196,24 +247,29 @@ function HistoryContent() {
           </thead>
           <tbody ref={tableRef}>
             {filtered.map((record) => {
-              const counterpart =
-                record.from === publicKey ? record.to : record.from
+              const outgoing = record.from === publicKey
+              const counterpart = outgoing ? record.to : record.from
               const nickname = nicknames[counterpart]
               const primary =
                 record.note?.trim() ||
                 record.memo?.trim() ||
                 nickname ||
                 truncateKey(counterpart, 5)
-              const showKey =
-                primary !== truncateKey(counterpart, 5)
+              const showKey = primary !== truncateKey(counterpart, 5)
               return (
               <tr key={record.id} className="border-t border-purple/15">
                 <td className="py-3 pr-4">{formatDate(record.createdAt)}</td>
                 <td className="py-3 pr-4">
                   <div className="history-party">
-                    <span className="history-party-name">
-                      {record.from === publicKey ? '→' : '←'} {primary}
+                    <span className={`history-dir ${outgoing ? 'is-out' : 'is-in'}`}>
+                      {outgoing ? (
+                        <IconSend className="h-3.5 w-3.5" />
+                      ) : (
+                        <IconReceive className="h-3.5 w-3.5" />
+                      )}
+                      {outgoing ? 'Enviado' : 'Recibido'}
                     </span>
+                    <span className="history-party-name">{primary}</span>
                     <span className="flex items-center gap-2">
                       {showKey ? (
                         <span className="history-party-key" title={counterpart}>
@@ -236,11 +292,12 @@ function HistoryContent() {
                   </div>
                 </td>
                 <td className="py-3 pr-4">
-                  <span className="inline-flex items-center gap-2">
+                  <span className="inline-flex items-center gap-2 font-semibold">
                     <AssetLogo
                       code={displayAssetCode(record.assetCode)}
                       className="h-5 w-5"
                     />
+                    {outgoing ? '−' : '+'}
                     {formatAmount(
                       record.amount,
                       displayAssetCode(record.assetCode),
@@ -252,12 +309,13 @@ function HistoryContent() {
                 </td>
                 <td className="py-3">
                   <a
-                    className="text-purple underline"
+                    className="history-tx"
                     href={explorerTxUrl(record.transactionHash)}
                     target="_blank"
                     rel="noreferrer"
                   >
                     {truncateKey(record.transactionHash, 4)}
+                    <IconExternal className="h-3.5 w-3.5" />
                   </a>
                 </td>
               </tr>
