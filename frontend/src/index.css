@@ -2057,3 +2057,17 @@ select.form-input {
   color: var(--color-muted);
 }
 
+@media (min-width: 768px) {
+  .page-stage.guide-stage .page-stage-inner {
+    display: flex;
+    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: none;
+  }
+
+  .page-stage.guide-stage .page-stage-head,
+  .page-stage.guide-stage .page-stage-body {
+    width: 100%;
+  }
+}
+

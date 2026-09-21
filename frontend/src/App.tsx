@@ -5,6 +5,7 @@ import { CreatePoolPage } from './pages/CreatePoolPage'
 import { FamilyPoolPage } from './pages/FamilyPoolPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { HomePage } from './pages/HomePage'
+import { HowItWorksPage } from './pages/HowItWorksPage'
 import { PoolDetailPage } from './pages/PoolDetailPage'
 import { PoolsHomePage } from './pages/PoolsHomePage'
 import { ProfilePage } from './pages/ProfilePage'
@@ -19,6 +20,7 @@ export default function App() {
         <Routes>
           <Route element={<AppShell />}>
             <Route path="/" element={<HomePage />} />
+            <Route path="/como-funciona" element={<HowItWorksPage />} />
             <Route path="/enviar" element={<SendPage />} />
             <Route path="/recibir" element={<ReceivePage />} />
             <Route path="/historial" element={<HistoryPage />} />

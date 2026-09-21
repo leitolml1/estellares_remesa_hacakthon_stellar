@@ -11,6 +11,7 @@ const links = [
   { to: '/historial', label: 'Historial' },
   { to: '/pools', label: 'Pools' },
   { to: '/familia', label: 'Familia' },
+  { to: '/como-funciona', label: 'Guía' },
 ]
 
 type OpenMenu = 'more' | 'wallet' | 'search' | null

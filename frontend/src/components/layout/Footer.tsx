@@ -28,6 +28,7 @@ export function Footer() {
               <Link to="/enviar">Pago directo</Link>
               <Link to="/pools/nuevo">Pool comunitario</Link>
               <Link to="/familia">Pool familiar</Link>
+              <Link to="/como-funciona">Cómo funciona</Link>
             </div>
           </div>
           <div>

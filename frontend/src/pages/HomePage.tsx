@@ -86,6 +86,11 @@ export function HomePage() {
                   label="Pool familiar"
                   icon={<IconFamily className="h-3.5 w-3.5" />}
                 />
+                <Tag
+                  to="/como-funciona"
+                  label="Cómo funciona"
+                  icon={<IconKey className="h-3.5 w-3.5" />}
+                />
               </div>
             </div>
           </div>
@@ -158,16 +163,34 @@ export function HomePage() {
         />
       </section>
 
-      <details className="rounded-[28px] border border-line bg-white px-6 py-5">
-        <summary className="cursor-pointer text-sm font-semibold text-purple-deep">
-          Cómo funciona por dentro
-        </summary>
-        <p className="mt-3 text-sm leading-6 text-muted">
-          El navegador arma la transacción, tu billetera Freighter la firma y
-          la red Stellar la confirma. Los pools comunitarios y la caja familiar
-          usan esa misma firma: tu clave no sale del navegador.
-        </p>
-      </details>
+      <section className="home-guide">
+        <div className="home-guide-copy">
+          <p className="home-guide-kicker">Guía paso a paso</p>
+          <h2>Cómo funciona</h2>
+          <p>
+            Armás en la app, firmás en Freighter y Stellar confirma. La guía
+            muestra cada módulo con pantallas de ejemplo: enviar, recibir,
+            historial, pool comunitario y caja familiar.
+          </p>
+          <Link to="/como-funciona">
+            <Button>Ver la guía →</Button>
+          </Link>
+        </div>
+        <ol className="home-guide-steps">
+          <li>
+            <span>01</span>
+            Conectar Freighter
+          </li>
+          <li>
+            <span>02</span>
+            Enviar o recibir
+          </li>
+          <li>
+            <span>03</span>
+            Pool o caja familiar
+          </li>
+        </ol>
+      </section>
     </div>
   )
 }
