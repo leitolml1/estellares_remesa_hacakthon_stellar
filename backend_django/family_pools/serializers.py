@@ -163,6 +163,38 @@ class ConfirmPoolSetupSerializer(serializers.Serializer):
         return limits
 
 
+class FamilyPoolLimitsUpdateSerializer(serializers.Serializer):
+    """Cambio de topes de retiro de una caja existente. Solo puede pedirlo
+    el creator (lo valida la vista): los topes son la unica barrera que
+    frena que una firma de la familia mueva todo el saldo de una vez, asi
+    que subirlos queda reservado a quien la creo."""
+
+    requester_public_key = serializers.CharField()
+    withdrawal_limit = serializers.CharField(max_length=32)
+    asset_withdrawal_limits = serializers.JSONField(required=False, default=dict)
+
+    def validate_requester_public_key(self, value: str) -> str:
+        return _validate_public_key(value)
+
+    def validate_withdrawal_limit(self, value: str) -> str:
+        return _validate_positive_decimal(value, "withdrawal_limit")
+
+    def validate_asset_withdrawal_limits(self, value: dict) -> dict:
+        if not value:
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("asset_withdrawal_limits debe ser un objeto {asset: limite}.")
+        limits = {}
+        for code, limit in value.items():
+            normalized = str(code).strip().upper()
+            if normalized not in ("USDC", "EURC"):
+                raise serializers.ValidationError(
+                    "asset_withdrawal_limits solo admite USDC o EURC como asset."
+                )
+            limits[normalized] = _validate_positive_decimal(str(limit), f"el limite de {normalized}")
+        return limits
+
+
 class FamilyPoolSerializer(serializers.ModelSerializer):
     class Meta:
         model = FamilyPool
@@ -251,7 +283,7 @@ class TrustlineBuildSerializer(serializers.Serializer):
 
 class AddSignerBuildSerializer(serializers.Serializer):
     signer_public_key = serializers.CharField()
-    weight = serializers.IntegerField(min_value=1, max_value=MAX_SIGNER_WEIGHT)
+    weight = serializers.IntegerField(min_value=0, max_value=MAX_SIGNER_WEIGHT)
     requester_public_key = serializers.CharField()
     role = serializers.CharField(required=False, default="deposit_withdraw")
 
@@ -281,6 +313,43 @@ class AddDepositorSerializer(serializers.Serializer):
 
 class WithdrawalSubmitSerializer(serializers.Serializer):
     signed_xdr = serializers.CharField()
+
+
+class MemberRoleSerializer(serializers.Serializer):
+    """Cambio de permisos (rol) de una wallet de la caja. Solo puede
+    pedirlo el creator (lo valida la vista): es un cambio de la DB del
+    backend, no toca on-chain."""
+
+    public_key = serializers.CharField()
+    role = serializers.CharField()
+    requester_public_key = serializers.CharField()
+
+    def validate_public_key(self, value: str) -> str:
+        return _validate_public_key(value)
+
+    def validate_requester_public_key(self, value: str) -> str:
+        return _validate_public_key(value)
+
+    def validate_role(self, value: str) -> str:
+        normalized = (value or "").strip().replace("-", "_")
+        if normalized not in ("deposit_withdraw", "withdraw", "deposit"):
+            raise serializers.ValidationError("El rol debe ser deposit_withdraw, withdraw o deposit.")
+        return normalized
+
+
+class MemberRemoveSerializer(serializers.Serializer):
+    """Baja de una wallet de la caja a nivel app (depositors +
+    wallet_roles). La revocacion on-chain (si era firmante) va por el
+    flujo set-signer con weight 0, que orquesta el frontend."""
+
+    public_key = serializers.CharField()
+    requester_public_key = serializers.CharField()
+
+    def validate_public_key(self, value: str) -> str:
+        return _validate_public_key(value)
+
+    def validate_requester_public_key(self, value: str) -> str:
+        return _validate_public_key(value)
 
 
 class BlendAmountSerializer(serializers.Serializer):

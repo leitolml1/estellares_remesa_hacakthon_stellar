@@ -98,6 +98,7 @@ function PoolsDashboard() {
           }
         />
         <DashCard
+          lilac
           title="Abrir un pool"
           hint="Pegá el short code o el link. Se abre público y se puede donar desde ahí."
         >
@@ -131,6 +132,7 @@ function PoolsDashboard() {
       </DashCol>
       <DashCol feed>
         <DashCard
+          lilac
           title="Tus pools"
           hint={
             publicKey

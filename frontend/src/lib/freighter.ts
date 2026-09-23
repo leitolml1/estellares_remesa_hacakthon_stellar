@@ -1,4 +1,5 @@
 import {
+  getAddress,
   isConnected,
   requestAccess,
   signTransaction,
@@ -28,6 +29,20 @@ export class FreighterSignatureRejectedError extends Error {
   constructor(message = 'Cancelaste la firma en el popup de Freighter.') {
     super(message)
     this.name = 'FreighterSignatureRejectedError'
+  }
+}
+
+export class FreighterAccountMismatchError extends Error {
+  readonly activeAddress: string
+
+  constructor(expectedAddress: string, activeAddress: string) {
+    const short = (key: string) => `${key.slice(0, 6)}…${key.slice(-4)}`
+    super(
+      `Freighter está con otra cuenta (${short(activeAddress)}) y no con la que la app espera ` +
+        `(${short(expectedAddress)}). Seleccioná la wallet correcta en la extensión y reconectá la sesión.`,
+    )
+    this.name = 'FreighterAccountMismatchError'
+    this.activeAddress = activeAddress
   }
 }
 
@@ -77,11 +92,33 @@ export async function connectFreighter(): Promise<{ publicKey: string }> {
   return { publicKey: result.address }
 }
 
+export async function getActiveAccount(): Promise<string | null> {
+  try {
+    const result = await getAddress()
+    if (result.error || !result.address) return null
+    return result.address
+  } catch {
+    // Versiones viejas de Freighter no exponen getAddress: no bloqueamos
+    // la firma por no poder verificar, Horizon valida igual.
+    return null
+  }
+}
+
 export async function signTransactionWithFreighter(
   xdr: string,
   networkPassphrase: string,
   address?: string,
 ): Promise<{ signedXdr: string }> {
+  // Anti tx_bad_auth_extra: si Freighter esta con otra cuenta activa,
+  // su firma no vale para la caja y Horizon rechaza la tx con un codigo
+  // criptico. Se detecta ANTES de firmar, con un mensaje claro.
+  if (address) {
+    const active = await getActiveAccount()
+    if (active && active !== address) {
+      throw new FreighterAccountMismatchError(address, active)
+    }
+  }
+
   const result = await signTransaction(xdr, {
     networkPassphrase,
     ...(address ? { address } : {}),
@@ -110,6 +147,7 @@ export function humanizeFreighterError(error: unknown): string {
   }
   if (error instanceof FreighterAccessDeniedError) return error.message
   if (error instanceof FreighterSignatureRejectedError) return error.message
+  if (error instanceof FreighterAccountMismatchError) return error.message
   if (error instanceof FreighterUnexpectedError) return error.message
   if (error instanceof Error) return error.message
   return 'No se pudo hablar con Freighter.'

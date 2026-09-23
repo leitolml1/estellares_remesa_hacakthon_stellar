@@ -139,6 +139,25 @@ select {
   color: #5c5478;
 }
 
+.goal-fx {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.65rem;
+  margin: 0.1rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--color-purple-deep);
+}
+
+.goal-fx span {
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: #5c5478;
+}
+
 .form-input {
   width: 100%;
   border-radius: var(--rd-card-radius);
@@ -1993,6 +2012,86 @@ select.form-input {
   caret-color: var(--color-yellow-hot);
   box-shadow: 0 0 0 1000px #161226 inset;
   transition: background-color 9999s ease-out;
+}
+
+.dash-card.is-lilac {
+  color: var(--color-ink);
+  background:
+    radial-gradient(ellipse 90% 70% at 108% -8%, rgb(109 74 255 / 0.5), transparent 56%),
+    radial-gradient(ellipse 55% 45% at -6% 112%, rgb(245 208 0 / 0.22), transparent 50%),
+    linear-gradient(165deg, #ddd4ff 0%, #cfc2ff 42%, #efe4ff 78%, #ffe9c8 100%);
+  border: 1.5px solid rgb(109 74 255 / 0.34);
+  box-shadow:
+    0 22px 48px rgb(109 74 255 / 0.2),
+    inset 0 3px 0 var(--color-purple),
+    inset 0 1px 0 rgb(255 255 255 / 0.55);
+}
+
+.dash-card.is-lilac .dash-card-title,
+.dash-card.is-lilac .dash-feed-key,
+.dash-card.is-lilac .dash-feed-value,
+.dash-card.is-lilac .dash-stat-value {
+  color: var(--color-ink);
+}
+
+.dash-card.is-lilac .dash-card-hint,
+.dash-card.is-lilac .dash-empty,
+.dash-card.is-lilac .dash-feed-date,
+.dash-card.is-lilac .dash-feed-from,
+.dash-card.is-lilac .dash-feed-code,
+.dash-card.is-lilac .dash-stat-label,
+.dash-card.is-lilac .form-hint {
+  color: #5c5478;
+}
+
+.dash-card.is-lilac .form-label {
+  color: var(--color-purple-deep);
+}
+
+.dash-card.is-lilac .dash-feed-item {
+  border-bottom-color: rgb(109 74 255 / 0.16);
+}
+
+.dash-card.is-lilac .dash-feed-link {
+  color: var(--color-purple-deep);
+  font-weight: 750;
+}
+
+.dash-card.is-lilac .dash-stat {
+  background: rgb(255 255 255 / 0.55);
+  border-color: rgb(109 74 255 / 0.16);
+}
+
+.dash-card.is-lilac .form-input {
+  color-scheme: light;
+  background: rgb(255 252 247 / 0.78);
+  border-color: rgb(109 74 255 / 0.28);
+  color: var(--color-ink);
+  caret-color: var(--color-purple-deep);
+  -webkit-text-fill-color: var(--color-ink);
+}
+
+.dash-card.is-lilac .form-input::placeholder {
+  color: rgb(92 84 120 / 0.72);
+  -webkit-text-fill-color: rgb(92 84 120 / 0.72);
+}
+
+.dash-card.is-lilac .form-input:hover,
+.dash-card.is-lilac .form-input:focus,
+.dash-card.is-lilac .form-input:focus-visible {
+  background: #fff;
+  border-color: var(--color-purple);
+  color: var(--color-ink);
+  -webkit-text-fill-color: var(--color-ink);
+  box-shadow: 0 0 0 3px rgb(109 74 255 / 0.16);
+}
+
+.dash-card.is-lilac .form-input:-webkit-autofill,
+.dash-card.is-lilac .form-input:-webkit-autofill:hover,
+.dash-card.is-lilac .form-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--color-ink);
+  caret-color: var(--color-purple-deep);
+  box-shadow: 0 0 0 1000px #fff inset;
 }
 
 .dash-card .block {

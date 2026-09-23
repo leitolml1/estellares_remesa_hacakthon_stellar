@@ -26,6 +26,7 @@ firmada (no del body del request), por si algo llega a este endpoint sin
 haber pasado por build.
 """
 
+import logging
 from decimal import Decimal
 
 from django.conf import settings
@@ -37,7 +38,9 @@ from stellar_sdk.signer_key import SignerKeyType
 from stellar_common.assets import CIRCLE_TESTNET_ASSET_ISSUERS
 from stellar_common.client import StellarAccountNotFoundError, StellarUnavailableError, get_server
 
-TRANSACTION_TIMEOUT_SECONDS = 180
+logger = logging.getLogger(__name__)
+
+TRANSACTION_TIMEOUT_SECONDS = 300
 STROOPS_PER_LUMEN = Decimal(10_000_000)
 MAX_THRESHOLD = 255
 
@@ -93,9 +96,17 @@ class StellarSubmissionError(Exception):
 
     @classmethod
     def from_bad_request(cls, exc: BadRequestError) -> "StellarSubmissionError":
-        result_codes = (exc.extras or {}).get("result_codes", {})
+        result_codes = (exc.extras or {}).get("result_codes", {}) or {}
         transaction_code = result_codes.get("transaction")
         operation_codes = result_codes.get("operations") or []
+
+        # Diagnostico: nunca se pierde el codigo crudo de Horizon. Si el
+        # rechazo es un caso raro, el mensaje termina mostrando los codes
+        # reales en vez de un "rechazada por la red" sin explicacion.
+        raw = f" (result codes: {transaction_code or '-'} / {' '.join(operation_codes) or '-'})"
+
+        def op_matches(*codes: str) -> bool:
+            return any(code in operation_codes for code in codes)
 
         if transaction_code == "tx_bad_seq":
             return cls("bad_seq", "El sequence number de la cuenta del pool esta desactualizado, reintenta.")
@@ -104,9 +115,55 @@ class StellarSubmissionError(Exception):
                 "insufficient_signatures",
                 "Faltan firmas o el peso combinado no alcanza el umbral requerido.",
             )
-        if "op_underfunded" in operation_codes:
+        if transaction_code == "tx_bad_auth_extra":
+            return cls(
+                "insufficient_signatures",
+                "La firma no corresponde a un firmante de esta caja: Freighter probablemente "
+                "esta con otra cuenta seleccionada. Reconecta la sesion con la wallet correcta "
+                "y reintenta.",
+            )
+        if transaction_code in ("tx_too_late", "tx_too_early"):
+            return cls(
+                "other",
+                "La transaccion vencio antes de enviarse (se armo hace demasiado). "
+                "Toca el boton otra vez y firma enseguida.",
+            )
+        if transaction_code == "tx_insufficient_fee":
+            return cls(
+                "other",
+                "La comision de la transaccion quedo corta contra la fee de la red. Reintenta: "
+                "el build usa la fee actual.",
+            )
+        if transaction_code == "tx_no_source_account":
+            return cls(
+                "other",
+                "La cuenta del pool no existe o fue cerrada en la red Stellar.",
+            )
+        if transaction_code == "tx_malformed" or "op_malformed" in operation_codes:
+            return cls("other", "La transaccion quedo mal armada (tx_malformed). Reintenta.")
+        if op_matches("op_invalid_set_options"):
+            return cls(
+                "other",
+                "Stellar rechazo la configuracion de signer/thresholds (op_invalid_set_options): "
+                "peso o umbral fuera de rango 0-255.",
+            )
+        if op_matches("op_low_reserve"):
+            return cls(
+                "other",
+                "La caja no tiene XLM de reserva suficiente para esta operacion "
+                "(agregar un firmante cuesta ~0.5 XLM de reserva). Envia XLM a la caja primero.",
+            )
+        if op_matches("op_underfunded"):
             return cls("underfunded", "Fondos insuficientes en la cuenta del pool para este retiro.")
-        return cls("other", "La transaccion de retiro fue rechazada por la red Stellar.")
+
+        logger.warning(
+            "Horizon rechazo una tx del pool con codigos sin mapeo: %s",
+            result_codes,
+        )
+        return cls(
+            "other",
+            f"La transaccion de retiro fue rechazada por la red Stellar{raw}",
+        )
 
 
 def account_exists(public_key: str) -> bool:
@@ -170,9 +227,13 @@ def build_create_account_tx(creator_public_key: str, pool_public_key: str, start
 
 def build_configure_signers_tx(pool_public_key: str, signers: list[dict], med_threshold: int) -> str:
     """Tx SetOptions (source=pool_public_key) que agrega a la familia como
-    signers, fija medThreshold para retiros, highThreshold = suma de todos
-    los weights (unanime, protege cambios futuros al multisig) y pone
-    master_weight en 0.
+    signers, fija medThreshold para retiros, highThreshold = weight del
+    signer con mas peso (el creator) y pone master_weight en 0.
+
+    El creator entra con weight CREATOR_SIGNER_WEIGHT y highThreshold
+    queda igual: alcanza con su firma para cambiar el multisig (agregar,
+    cambiar o dar de baja firmantes) sin necesidad de que firme el resto
+    de la familia. Retiros siguen con medThreshold.
 
     Cambiar signers/weights/thresholds requiere highThreshold (verificado
     empiricamente contra testnet: un SetOptions que solo toca otros campos,
@@ -190,7 +251,7 @@ def build_configure_signers_tx(pool_public_key: str, signers: list[dict], med_th
     except (ConnectionError, BaseHorizonError) as exc:
         raise StellarUnavailableError(str(exc)) from exc
 
-    high_threshold = sum(signer["weight"] for signer in signers)
+    high_threshold = max(signer["weight"] for signer in signers)
 
     builder = TransactionBuilder(
         pool_account,
@@ -428,25 +489,61 @@ def build_change_trust_tx(pool_account: str, asset_code: str) -> str:
     return tx.to_xdr()
 
 
-def build_add_signer_tx(pool_account: str, signer_public_key: str, weight: int) -> str:
-    """Agrega un firmante y sube highThreshold para seguir exigiendo
-    acuerdo unanime. Requiere el umbral alto (toda la familia actual).
-    """
-    onchain = confirm_pool_setup(pool_account)
-    existing = {signer["public_key"] for signer in onchain["signers"]}
-    if signer_public_key in existing or signer_public_key == pool_account:
-        raise WithdrawalValidationError("Esa wallet ya es firmante de esta caja.")
+CREATOR_SIGNER_WEIGHT = 2
 
-    new_high = onchain["high_threshold"] + weight
-    if new_high > MAX_THRESHOLD:
-        raise WithdrawalValidationError(
-            f"La suma de weights ({new_high}) no puede superar {MAX_THRESHOLD}."
-        )
+
+def build_set_signer_tx(
+    pool_account: str,
+    creator_public_key: str,
+    signer_public_key: str,
+    weight: int,
+) -> str:
+    """Agrega, cambia el peso o da de baja (weight 0) un firmante de la
+    caja con UNA operacion SetOptions, sin tocar thresholds: el creator
+    entra con weight CREATOR_SIGNER_WEIGHT igual al highThreshold, asi que
+    su firma sola alcanza para aprobar la tx.
+
+    Reglas:
+    - weight >= 1: alta (wallet nueva) o cambio de peso. El creator no
+      puede quedar con menos peso que highThreshold (perdria el poder de
+      editar el multisig solo).
+    - weight == 0: baja de firmante. Tiene que existir, no puede ser el
+      creator ni la master key, y tiene que quedar al menos un firmante.
+    """
+    if signer_public_key == pool_account:
+        raise WithdrawalValidationError("La master key de la caja no puede usarse como firmante.")
+
+    onchain = confirm_pool_setup(pool_account)
+    onchain_signers = {signer["public_key"]: signer["weight"] for signer in onchain["signers"]}
+
+    if weight == 0:
+        if signer_public_key not in onchain_signers:
+            raise WithdrawalValidationError("Esa wallet no es firmante de esta caja.")
+        if signer_public_key == creator_public_key:
+            raise WithdrawalValidationError(
+                "El creator de la caja no puede darse de baja a si mismo."
+            )
+        remaining = [key for key in onchain_signers if key != signer_public_key]
+        if not remaining:
+            raise WithdrawalValidationError(
+                "No se puede dar de baja el ultimo firmante de la caja."
+            )
+        if max(onchain_signers[key] for key in remaining) < onchain["high_threshold"]:
+            raise WithdrawalValidationError(
+                "Primero tiene que subir el weight del creator a "
+                f"{onchain['high_threshold']} (boton 'Activar poder del creator'): "
+                "si da de baja este firmante, nadie vuelve a alcanzar el highThreshold."
+            )
+    else:
+        if signer_public_key == creator_public_key and weight < onchain["high_threshold"]:
+            raise WithdrawalValidationError(
+                f"El creator tiene que mantener weight >= {onchain['high_threshold']} "
+                "(highThreshold) para poder seguir editando el multisig el solo."
+            )
 
     builder, _server = _load_pool_builder(pool_account)
     tx = (
         builder.append_ed25519_public_key_signer(signer_public_key, weight)
-        .append_set_options_op(high_threshold=new_high)
         .set_timeout(TRANSACTION_TIMEOUT_SECONDS)
         .build()
     )
@@ -498,14 +595,14 @@ def _set_options_touched_fields(operation: SetOptions) -> set[str]:
     return {field for field in fields if getattr(operation, field) is not None}
 
 
-def submit_add_signer(pool_account: str, signed_xdr: str) -> dict:
-    """Somete un alta de firmante, validando la ESTRUCTURA de la tx firmada
-    igual que se valida un retiro: la unica forma admitida es la que arma
-    build_add_signer_tx, o sea exactamente dos operaciones SetOptions -
-    (1) dar de alta un signer ed25519 nuevo con peso >= 1, (2) subir
-    high_threshold. Todo lo demas (borrar signers via weight 0, restaurar
-    master_weight, bajar thresholds) se rechaza aca, sin confiar en que
-    la tx haya pasado por build/.
+def submit_set_signer(pool_account: str, creator_public_key: str, signed_xdr: str) -> dict:
+    """Somete un alta/cambio de peso/baja de firmante, validando la
+    ESTRUCTURA de la tx firmada igual que se valida un retiro: la unica
+    forma admitida es la que arma build_set_signer_tx, o sea exactamente
+    una operacion SetOptions que solo toca el campo `signer` (ed25519,
+    weight 0 a 255). Todo lo demas (tocar master_weight, thresholds,
+    home_domain, flags) se rechaza aca, sin confiar en que la tx haya
+    pasado por build/.
     """
     envelope = _envelope_from_signed_xdr(signed_xdr)
     transaction = envelope.transaction
@@ -513,45 +610,56 @@ def submit_add_signer(pool_account: str, signed_xdr: str) -> dict:
         raise WithdrawalValidationError("La transaccion no tiene como source la cuenta de este pool.")
 
     operations = transaction.operations
-    if len(operations) != 2 or not all(isinstance(operation, SetOptions) for operation in operations):
+    if len(operations) != 1 or not isinstance(operations[0], SetOptions):
         raise WithdrawalValidationError(
-            "La tx de alta de firmante debe tener exactamente dos operaciones SetOptions."
+            "La tx de alta/baja de firmante debe tener exactamente una operacion SetOptions."
         )
 
-    add_op, threshold_op = operations
-
-    if _set_options_touched_fields(add_op) != {"signer"}:
+    op = operations[0]
+    if _set_options_touched_fields(op) != {"signer"}:
         raise WithdrawalValidationError(
-            "La primera operacion solo puede dar de alta un signer, sin tocar otra configuracion."
+            "La operacion solo puede dar de alta o cambiar el peso de un signer, "
+            "sin tocar master_weight, thresholds u otra configuracion."
         )
-    signer = add_op.signer
-    if (
-        signer is None
-        or signer.signer_key.signer_key_type != SignerKeyType.SIGNER_KEY_TYPE_ED25519
-        or (signer.weight or 0) < 1
-    ):
-        raise WithdrawalValidationError(
-            "La primera operacion tiene que dar de alta una wallet ed25519 con peso >= 1."
-        )
+    signer = op.signer
+    if signer is None or signer.signer_key.signer_key_type != SignerKeyType.SIGNER_KEY_TYPE_ED25519:
+        raise WithdrawalValidationError("El signer tiene que ser una wallet ed25519.")
+    weight = signer.weight or 0
+    if not 0 <= weight <= MAX_THRESHOLD:
+        raise WithdrawalValidationError(f"El weight tiene que estar entre 0 y {MAX_THRESHOLD}.")
     signer_public_key = signer.signer_key.encoded_signer_key
-
-    if _set_options_touched_fields(threshold_op) != {"high_threshold"}:
-        raise WithdrawalValidationError(
-            "La segunda operacion solo puede subir high_threshold, sin tocar otra configuracion."
-        )
+    if signer_public_key == pool_account:
+        raise WithdrawalValidationError("La master key de la caja no puede usarse como firmante.")
 
     onchain = confirm_pool_setup(pool_account)
-    existing = {existing_signer["public_key"] for existing_signer in onchain["signers"]}
-    if signer_public_key == pool_account or signer_public_key in existing:
-        raise WithdrawalValidationError("Esa wallet ya es firmante de esta caja (o es la master key).")
-    if not (
-        onchain["high_threshold"] <= threshold_op.high_threshold <= MAX_THRESHOLD
-    ):
-        raise WithdrawalValidationError(
-            "high_threshold solo puede subir (y seguir dentro del rango 0-255)."
-        )
+    onchain_signers = {s["public_key"]: s["weight"] for s in onchain["signers"]}
 
-    return _submit_pool_envelope(envelope)
+    if weight == 0:
+        if signer_public_key not in onchain_signers:
+            raise WithdrawalValidationError("Esa wallet no es firmante de esta caja.")
+        if signer_public_key == creator_public_key:
+            raise WithdrawalValidationError(
+                "El creator de la caja no puede darse de baja a si mismo."
+            )
+        remaining = [key for key in onchain_signers if key != signer_public_key]
+        if not remaining:
+            raise WithdrawalValidationError(
+                "No se puede dar de baja el ultimo firmante de la caja."
+            )
+        if max(onchain_signers[key] for key in remaining) < onchain["high_threshold"]:
+            raise WithdrawalValidationError(
+                "Primero tiene que subir el weight del creator: si da de baja este "
+                "firmante, nadie vuelve a alcanzar el highThreshold."
+            )
+    else:
+        if signer_public_key == creator_public_key and weight < onchain["high_threshold"]:
+            raise WithdrawalValidationError(
+                f"El creator tiene que mantener weight >= {onchain['high_threshold']} "
+                "(highThreshold) para poder seguir editando el multisig el solo."
+            )
+
+    result = _submit_pool_envelope(envelope)
+    return {**result, "signer": signer_public_key, "weight": weight}
 
 
 def _submit_pool_envelope(envelope: TransactionEnvelope) -> dict:
@@ -562,5 +670,23 @@ def _submit_pool_envelope(envelope: TransactionEnvelope) -> dict:
         raise StellarSubmissionError.from_bad_request(exc) from exc
     except (ConnectionError, BaseHorizonError) as exc:
         raise StellarUnavailableError(str(exc)) from exc
+
+    # Una tx puede pasar los chequeos de Horizon (fee/auth/seq) y AUN ASI
+    # fallar cuando se aplica (ej: op_low_reserve al agregar un signer). En
+    # ese caso la respuesta llega con successful: false y hay que devolver
+    # los codigos de operacion en vez de un KeyError o un exito mentiroso.
+    if not response.get("successful", True):
+        failed_hash = response.get("hash") or "(sin hash)"
+        logger.warning(
+            "La tx %s se incluyo en un ledger pero fallo su ejecucion: %s",
+            failed_hash,
+            response.get("result_xdr"),
+        )
+        raise StellarSubmissionError(
+            "other",
+            "La transaccion se incluyo en el ledger pero fallo al aplicarse "
+            f"(hash={failed_hash}). Lo mas probable es fondos/reserva insuficiente "
+            "en la caja para la operacion pedida.",
+        )
 
     return {"hash": response["hash"], "ledger": response["ledger"]}

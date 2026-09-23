@@ -24,6 +24,8 @@ from .stellar_client import (
     progress_summary,
 )
 from .vault_client import (
+    VaultConfigError,
+    VaultConfirmationTimeoutError,
     VaultSimulationError,
     VaultUnavailableError,
     VaultValidationError,
@@ -36,6 +38,31 @@ from .vault_client import (
     parse_invoke,
     submit_vault_tx,
 )
+
+
+def _vault_unavailable_response(exc: VaultUnavailableError) -> Response:
+    """Mapea los errores de disponibilidad/config del vault: un
+    VaultConfigError es un error de configuracion del backend (500), el
+    resto es indisponibilidad de la red (503)."""
+    if isinstance(exc, VaultConfigError):
+        return Response(
+            {"detail": f"Error de configuracion del backend: {exc}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return Response(
+        {"detail": "El servicio de Soroban RPC no esta disponible, reintenta en unos segundos."},
+        status=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+
+
+def _pool_registered_on_chain(pool: Pool) -> bool:
+    """True si el contrato ya tiene registrado este pool con este owner.
+    Best-effort: si Soroban no responde, devuelve False (no reconcilia)."""
+    try:
+        state = get_vault_state(pool.short_code)
+    except VaultUnavailableError:
+        return False
+    return bool(state.get("registered")) and state.get("owner") == pool.wallet_address
 
 
 class PoolCreateView(APIView):
@@ -51,7 +78,6 @@ class PoolCreateView(APIView):
     (ver get_latest_horizon_cursor), asi nunca se cuenta actividad previa
     de la wallet como si fuera de este pool.
     """
-
     def get(self, request):
         public_key = (request.query_params.get("public_key") or "").strip()
         if not public_key:
@@ -182,20 +208,19 @@ class PoolDonationsView(APIView):
 
 def _current_vault_equivalent(pool: Pool) -> int:
     """Progreso ya donado a la wallet (XLM-equivalente escalado), para que
-    un pool migrado al vault conserve su avance. Best-effort: si Horizon
-    no responde, se migra desde cero (solo afecta el conteo historico, no
-    los fondos)."""
-    try:
-        synced = get_pool_with_synced_progress(pool.short_code)
-    except (Pool.DoesNotExist, StellarAccountNotFoundError, StellarUnavailableError):
-        return 0
+    un pool migrado al vault conserve su avance. Si Horizon no responde
+    falla hacia arriba (no se registra un pool con initial_equivalent
+    inventado): solo afecta el conteo historico, no los fondos."""
+    synced = get_pool_with_synced_progress(pool.short_code)
     equivalent = progress_summary(synced).get("xlm_equivalent_total")
     if not equivalent:
         return 0
     try:
         return int(Decimal(equivalent) * Decimal(10_000_000))
-    except Exception:
-        return 0
+    except Exception as exc:
+        raise VaultValidationError(
+            "No se pudo interpretar el progreso historico de este pool."
+        ) from exc
 
 
 class VaultRegisterBuildView(APIView):
@@ -224,6 +249,14 @@ class VaultRegisterBuildView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
+        # Reconciliacion: si el contrato ya tiene este pool (registro que
+        # confirmo a pesar de un timeout reportado), se marca en la DB y no
+        # se vuelve a intentar el create_pool (panic on-chain garantizado).
+        if _pool_registered_on_chain(pool):
+            pool.vault_registered = True
+            pool.save(update_fields=["vault_registered", "updated_at"])
+            return Response({"already_registered": True})
+
         goal = 0
         if pool.goal_amount:
             try:
@@ -235,19 +268,36 @@ class VaultRegisterBuildView(APIView):
                 )
 
         try:
+            historical = _current_vault_equivalent(pool)
+        except StellarAccountNotFoundError:
+            return Response(
+                {"detail": "La wallet de este pool no existe o dejo de estar fondeada en la red Stellar."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except StellarUnavailableError:
+            return Response(
+                {
+                    "detail": (
+                        "El servicio de Stellar Horizon no esta disponible y no se pudo "
+                        "calcular el progreso previo del pool, reintenta en unos segundos."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except VaultValidationError as exc:
+            return Response({"detail": str(exc.reason)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+        try:
             xdr = build_create_pool_tx(
                 pool.short_code,
                 pool.wallet_address,
                 goal,
-                _current_vault_equivalent(pool),
+                historical,
             )
         except VaultSimulationError as exc:
             return Response({"detail": exc.message}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-        except VaultUnavailableError:
-            return Response(
-                {"detail": "El servicio de Soroban RPC no esta disponible, reintenta en unos segundos."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        except VaultUnavailableError as exc:
+            return _vault_unavailable_response(exc)
 
         return Response({"xdr": xdr})
 
@@ -298,11 +348,8 @@ class VaultDepositBuildView(APIView):
             return Response({"detail": exc.message}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         except VaultValidationError as exc:
             return Response({"detail": str(exc.reason)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-        except VaultUnavailableError:
-            return Response(
-                {"detail": "El servicio de Soroban RPC no esta disponible, reintenta en unos segundos."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        except VaultUnavailableError as exc:
+            return _vault_unavailable_response(exc)
 
         return Response({"xdr": xdr})
 
@@ -368,11 +415,8 @@ class VaultWithdrawBuildView(APIView):
             return Response({"detail": exc.message}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         except VaultValidationError as exc:
             return Response({"detail": str(exc.reason)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-        except VaultUnavailableError:
-            return Response(
-                {"detail": "El servicio de Soroban RPC no esta disponible, reintenta en unos segundos."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        except VaultUnavailableError as exc:
+            return _vault_unavailable_response(exc)
 
         return Response({"xdr": xdr})
 
@@ -440,15 +484,24 @@ class VaultSubmitView(APIView):
 
         try:
             result = submit_vault_tx(serializer.validated_data["signed_xdr"])
+        except VaultConfirmationTimeoutError as exc:
+            # La tx se sometio pero el polling se quedo sin intentos: puede
+            # terminar confirmando igual. Antes de reportar 503, se consulta
+            # el estado on-chain: si el pool ya existe aca se marca como
+            # registrado y se devuelve el hash real (evita el estado stuck
+            # clasico/vault y el reintento que panicaria con "ya existe").
+            if fn_name == "create_pool" and not pool.vault_registered:
+                if _pool_registered_on_chain(pool):
+                    pool.vault_registered = True
+                    pool.save(update_fields=["vault_registered", "updated_at"])
+                    return Response({"hash": exc.tx_hash})
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         except VaultSimulationError as exc:
             return Response({"detail": exc.message}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         except VaultValidationError as exc:
             return Response({"detail": str(exc.reason)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-        except VaultUnavailableError:
-            return Response(
-                {"detail": "El servicio de Soroban RPC no esta disponible, reintenta en unos segundos."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        except VaultUnavailableError as exc:
+            return _vault_unavailable_response(exc)
 
         if fn_name == "create_pool":
             pool.vault_registered = True
@@ -469,11 +522,8 @@ class VaultStateView(APIView):
         get_object_or_404(Pool, short_code=short_code)
         try:
             state = get_vault_state(short_code)
-        except VaultUnavailableError:
-            return Response(
-                {"detail": "El servicio de Soroban RPC no esta disponible, reintenta en unos segundos."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        except VaultUnavailableError as exc:
+            return _vault_unavailable_response(exc)
         return Response(state)
 
 
@@ -489,9 +539,6 @@ class VaultLeaderboardView(APIView):
         get_object_or_404(Pool, short_code=short_code)
         try:
             donors = get_vault_leaderboard(short_code)
-        except VaultUnavailableError:
-            return Response(
-                {"detail": "El servicio de Soroban RPC no esta disponible, reintenta en unos segundos."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        except VaultUnavailableError as exc:
+            return _vault_unavailable_response(exc)
         return Response({"donors": donors})

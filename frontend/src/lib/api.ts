@@ -16,6 +16,11 @@ import { type ApiError } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
 
+const DEFAULT_TIMEOUT_MS = 20_000
+const SUBMIT_TIMEOUT_MS = 45_000
+
+type ExtendedInit = RequestInit & { timeoutMs?: number }
+
 export class BackendError extends Error {
   readonly status: number
 
@@ -55,10 +60,11 @@ async function parseError(response: Response): Promise<BackendError> {
   return new BackendError({ status: response.status, message })
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: ExtendedInit): Promise<T> {
+  const { timeoutMs, ...fetchInit } = init ?? {}
   const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    signal: init?.signal ?? AbortSignal.timeout(20_000),
+    ...fetchInit,
+    signal: fetchInit.signal ?? AbortSignal.timeout(timeoutMs ?? DEFAULT_TIMEOUT_MS),
     headers: {
       Accept: 'application/json',
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
@@ -383,7 +389,7 @@ export async function getPoolDonations(
 }
 
 export function buildVaultRegister(shortCode: string, ownerPublicKey: string) {
-  return request<{ xdr: string }>(
+  return request<{ xdr?: string; already_registered?: boolean }>(
     `/api/pools/${shortCode}/vault/register-build/`,
     { method: 'POST', body: JSON.stringify({ owner_public_key: ownerPublicKey }) },
   )
@@ -417,7 +423,11 @@ export function buildVaultWithdraw(
 export function submitVaultTx(shortCode: string, signedXdr: string) {
   return request<{ hash: string }>(
     `/api/pools/${shortCode}/vault/submit/`,
-    { method: 'POST', body: JSON.stringify({ signed_xdr: signedXdr }) },
+    {
+      method: 'POST',
+      body: JSON.stringify({ signed_xdr: signedXdr }),
+      timeoutMs: SUBMIT_TIMEOUT_MS,
+    },
   )
 }
 
@@ -537,6 +547,21 @@ export async function confirmFamilyPool(body: {
     method: 'POST',
     body: JSON.stringify(body),
   })
+  return mapFamilyPool(pool)
+}
+
+export async function updateFamilyPoolLimits(
+  poolAccount: string,
+  body: {
+    requester_public_key: string
+    withdrawal_limit: string
+    asset_withdrawal_limits?: Partial<Record<'USDC' | 'EURC', string>>
+  },
+): Promise<FamilyPoolRecord> {
+  const pool = await request<DjangoFamilyPool>(
+    `/api/family-pools/${poolAccount}/limits/`,
+    { method: 'POST', body: JSON.stringify(body) },
+  )
   return mapFamilyPool(pool)
 }
 
@@ -669,6 +694,28 @@ export async function addFamilyDepositor(
   return mapFamilyPool(pool)
 }
 
+export async function updateFamilyMemberRole(
+  poolAccount: string,
+  body: { public_key: string; role: string; requester_public_key: string },
+): Promise<FamilyPoolRecord> {
+  const pool = await request<DjangoFamilyPool>(
+    `/api/family-pools/${poolAccount}/members/role/`,
+    { method: 'POST', body: JSON.stringify(body) },
+  )
+  return mapFamilyPool(pool)
+}
+
+export async function removeFamilyWallet(
+  poolAccount: string,
+  body: { public_key: string; requester_public_key: string },
+): Promise<FamilyPoolRecord> {
+  const pool = await request<DjangoFamilyPool>(
+    `/api/family-pools/${poolAccount}/members/remove/`,
+    { method: 'POST', body: JSON.stringify(body) },
+  )
+  return mapFamilyPool(pool)
+}
+
 export function buildBlendSupply(poolAccount: string, amount: string, requesterPublicKey: string) {
   return request<{ xdr: string }>(
     `/api/family-pools/${poolAccount}/blend/supply/build/`,
@@ -698,6 +745,7 @@ export function submitBlendTx(poolAccount: string, signedXdr: string, requesterP
         signed_xdr: signedXdr,
         requester_public_key: requesterPublicKey,
       }),
+      timeoutMs: SUBMIT_TIMEOUT_MS,
     },
   )
 }

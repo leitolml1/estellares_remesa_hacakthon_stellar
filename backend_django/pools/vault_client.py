@@ -39,6 +39,20 @@ class VaultUnavailableError(Exception):
     """Soroban RPC no responde, o la tx no se confirmo a tiempo."""
 
 
+class VaultConfirmationTimeoutError(VaultUnavailableError):
+    """La tx se sometio pero no se confirmo dentro del polling; puede
+    terminar confirmando igual. Trae el hash para poder reconciliar."""
+
+    def __init__(self, message: str, tx_hash: str):
+        super().__init__(message)
+        self.tx_hash = tx_hash
+
+
+class VaultConfigError(VaultUnavailableError):
+    """El backend no tiene configurado el vault (VAULT_CONTRACT_ID
+    vacio): es un error de configuracion, no de disponibilidad."""
+
+
 class VaultSimulationError(Exception):
     """El contrato (o el host) rechazo la operacion: meta cumplida,
     auto-donacion del owner, retiro sobre lo donado, asset no admitido,
@@ -97,7 +111,7 @@ def scaled_to_amount(scaled: int) -> str:
 
 def _client() -> ContractClient:
     if not settings.VAULT_CONTRACT_ID:
-        raise VaultUnavailableError("VAULT_CONTRACT_ID no esta configurado.")
+        raise VaultConfigError("VAULT_CONTRACT_ID no esta configurado en el backend.")
     return ContractClient(
         contract_id=settings.VAULT_CONTRACT_ID,
         rpc_url=settings.STELLAR_SOROBAN_RPC_URL,
@@ -253,9 +267,10 @@ def submit_vault_tx(signed_xdr: str) -> dict:
                 f"La transaccion se incluyo en el ledger pero fallo (hash={send_result.hash})."
             )
 
-    raise VaultUnavailableError(
+    raise VaultConfirmationTimeoutError(
         f"No se pudo confirmar la transaccion a tiempo (hash={send_result.hash}); "
-        "puede seguir procesandose, consulta el estado mas tarde antes de reintentar."
+        "puede seguir procesandose, consulta el estado mas tarde antes de reintentar.",
+        send_result.hash,
     )
 
 

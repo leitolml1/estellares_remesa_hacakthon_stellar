@@ -82,16 +82,18 @@ export function DashCard({
   hint,
   icon,
   extra,
+  lilac = false,
   children,
 }: {
   title: string
   hint?: string
   icon?: ReactNode
   extra?: ReactNode
+  lilac?: boolean
   children: ReactNode
 }) {
   return (
-    <section className="dash-card">
+    <section className={`dash-card${lilac ? ' is-lilac' : ''}`}>
       <div className="dash-card-head">
         <h2 className="dash-card-title">
           {icon ? <span className="dash-card-icon">{icon}</span> : null}

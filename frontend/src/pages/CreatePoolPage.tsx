@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FormPanel, PageStage } from '../components/layout/PageStage'
 import { WalletGate } from '../components/WalletGate'
@@ -12,10 +12,12 @@ import { useWallet } from '../context/WalletContext'
 import {
   buildVaultRegister,
   createCommunityPool,
+  getQuote,
   humanizeApiError,
   submitVaultTx,
 } from '../lib/api'
-import { TESTNET_NETWORK_PASSPHRASE, isStellarAmount, truncateKey } from '../lib/format'
+import { XLM_REFERENCE_RATES } from '../lib/assets'
+import { TESTNET_NETWORK_PASSPHRASE, formatAmount, isStellarAmount, truncateKey } from '../lib/format'
 import { signTransactionWithFreighter } from '../lib/freighter'
 import { savePool } from '../lib/storage'
 import type { CommunityPool } from '../types'
@@ -55,10 +57,13 @@ function CreatePoolForm() {
     if (!publicKey) return
     setVaultBusy('Registrando la colecta…')
     try {
-      const { xdr } = await buildVaultRegister(shortCode, publicKey)
+      const built = await buildVaultRegister(shortCode, publicKey)
+      // Reconciliado por el backend: el contrato ya tiene el pool (por
+      // ejemplo, un alta que confirmo a pesar de un timeout reportado).
+      if (built.already_registered || !built.xdr) return
       setVaultBusy('Firmá el alta en tu billetera…')
       const signed = await signTransactionWithFreighter(
-        xdr,
+        built.xdr,
         TESTNET_NETWORK_PASSPHRASE,
         publicKey,
       )
@@ -208,6 +213,7 @@ function CreatePoolForm() {
             placeholder="500"
             inputMode="decimal"
           />
+          <GoalFx xlm={goal} />
         </Field>
         <Field
           label="Fecha límite"
@@ -240,4 +246,67 @@ function CreatePoolForm() {
     </FormPanel>
     </div>
   )
+}
+
+function GoalFx({ xlm }: { xlm: string }) {
+  const trimmed = xlm.trim()
+  const valid = isStellarAmount(trimmed)
+  const [quoted, setQuoted] = useState<{
+    xlm: string
+    usdc: string
+    eurc: string
+    source: string
+  } | null>(null)
+
+  useEffect(() => {
+    if (!valid) {
+      setQuoted(null)
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      Promise.all([
+        getQuote('XLM', 'USDC', trimmed),
+        getQuote('XLM', 'EURC', trimmed),
+      ])
+        .then(([usdcQuote, eurcQuote]) => {
+          if (cancelled) return
+          setQuoted({
+            xlm: trimmed,
+            usdc: usdcQuote.destAmount,
+            eurc: eurcQuote.destAmount,
+            source: usdcQuote.source,
+          })
+        })
+        .catch(() => {
+          if (!cancelled) setQuoted(null)
+        })
+    }, 400)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [trimmed, valid])
+
+  if (!valid) return null
+
+  const live = quoted?.xlm === trimmed ? quoted : null
+  const usdc = live?.usdc ?? xlmToAsset(trimmed, 'USDC')
+  const eurc = live?.eurc ?? xlmToAsset(trimmed, 'EURC')
+  const source = live?.source ?? 'reference'
+
+  return (
+    <p className="goal-fx">
+      ≈ {formatAmount(usdc, 'USDC')} · {formatAmount(eurc, 'EURC')}
+      <span>
+        {source === 'dex' ? 'cotización del DEX' : 'tasa referencial de testnet'}
+      </span>
+    </p>
+  )
+}
+
+function xlmToAsset(xlm: string, code: 'USDC' | 'EURC'): string {
+  const rate = XLM_REFERENCE_RATES[code]
+  if (!rate) return '0'
+  return String(Number(xlm) / rate)
 }

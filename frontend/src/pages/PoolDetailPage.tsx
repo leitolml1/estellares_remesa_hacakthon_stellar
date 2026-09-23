@@ -31,7 +31,6 @@ import {
   displayAssetCode,
   getKnownAsset,
   KNOWN_ASSETS,
-  knownAssetBalance,
   toPaymentAsset,
   xlmEquivalent,
   type KnownAssetCode,
@@ -74,7 +73,7 @@ function PoolDetailContent({
   onHead: (head: { title: string; kicker: string }) => void
 }) {
   const { shortCode = '' } = useParams()
-  const { publicKey, balances, refreshBalances } = useWallet()
+  const { publicKey, refreshBalances } = useWallet()
   const [detail, setDetail] = useState<PoolDetail | null>(null)
   const [amount, setAmount] = useState('')
   const [assetCode, setAssetCode] = useState<KnownAssetCode>('XLM')
@@ -83,6 +82,7 @@ function PoolDetailContent({
   const [copied, setCopied] = useState<'link' | 'code' | null>(null)
   const [retryToken, setRetryToken] = useState(0)
   const [hasTrustline, setHasTrustline] = useState<boolean | null>(null)
+  const [donorHasTrustline, setDonorHasTrustline] = useState<boolean | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
   const [donations, setDonations] = useState<PaymentRecord[]>([])
@@ -246,6 +246,27 @@ function PoolDetailContent({
     }
   }, [shortCode, poolRegistered])
 
+  // Reconciliación: si el pool esta marcado como clasico en la DB pero
+  // on-chain el vault ya lo tiene registrado (registro que "falro" por
+  // timeout), re-traemos el detalle para reflejar el modo vault.
+  useEffect(() => {
+    if (!pool || pool.vaultRegistered) return
+    let cancelled = false
+    getVaultState(shortCode)
+      .then((state) => {
+        if (!cancelled && state.registered && !detail?.pool.vaultRegistered) {
+          return getCommunityPool(shortCode).then((next) => setDetail(next))
+        }
+        return undefined
+      })
+      .catch(() => {
+        // best-effort
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [shortCode, pool, detail])
+
   useEffect(() => {
     const asset = getKnownAsset(assetCode)
     if (!pool || pool.vaultRegistered || !asset?.issuer) {
@@ -277,6 +298,32 @@ function PoolDetailContent({
   const selfDonation = Boolean(
     publicKey && pool && (publicKey === pool.creator || publicKey === pool.walletPublicKey),
   )
+
+  // Trustline del DONANTE conectado: para depositar USDC/EURC el emisor de
+  // la transaccion tambien necesita la trustline activa (vault y clasico).
+  useEffect(() => {
+    const asset = getKnownAsset(assetCode)
+    if (!publicKey || !asset?.issuer || selfDonation) {
+      setDonorHasTrustline(null)
+      return
+    }
+    const issuer = asset.issuer
+    const code = asset.code
+    const donorKey = publicKey
+    let cancelled = false
+    async function loadDonorTrust() {
+      try {
+        const result = await checkTrustline(donorKey, code, issuer)
+        if (!cancelled) setDonorHasTrustline(result.hasTrustline)
+      } catch {
+        if (!cancelled) setDonorHasTrustline(null)
+      }
+    }
+    void loadDonorTrust()
+    return () => {
+      cancelled = true
+    }
+  }, [publicKey, assetCode, selfDonation])
   const vaultRaised = useMemo(() => {
     if (vault?.equivalentTotal != null && vault.equivalentTotal !== '') {
       const n = Number(vault.equivalentTotal)
@@ -352,6 +399,9 @@ function PoolDetailContent({
   const canOpenTrustline = Boolean(
     publicKey && pool && publicKey === pool.walletPublicKey && selectedAsset?.issuer,
   )
+  const canActivateAsDonor = Boolean(
+    publicKey && selectedAsset?.issuer && donorHasTrustline === false && !selfDonation,
+  )
 
   // Leaderboard: on-chain para pools vault, agregado client-side (sobre los
   // ultimos aportes) para los clasicos.
@@ -408,6 +458,8 @@ function PoolDetailContent({
       )
       await submitSignedXdr(signed.signedXdr)
       setHasTrustline(true)
+      setDonorHasTrustline(true)
+      void refreshBalances()
       setOk(`La wallet ya acepta ${selectedAsset.code}.`)
     } catch (caught) {
       setError(humanizeFlowError(caught))
@@ -439,9 +491,9 @@ function PoolDetailContent({
       if (pool.vaultRegistered) {
         // Deposito al vault: Django arma la invocacion al contrato, la
         // firma el donante con Freighter y el contrato mueve los tokens.
-        if (selectedAsset.issuer && knownAssetBalance(balances?.balances, selectedAsset) == null) {
+        if (selectedAsset.issuer && donorHasTrustline === false) {
           setError(
-            `Tu wallet no tiene ${selectedAsset.code}: activá el activo y conseguí saldo antes de donar.`,
+            `Tu wallet todavía no acepta ${selectedAsset.code}: activalo con el botón "Activar ${selectedAsset.code}" y conseguí saldo de testnet antes de donar.`,
           )
           return
         }
@@ -472,6 +524,12 @@ function PoolDetailContent({
       }
 
       // Pool clasico: pago directo a la wallet con el memo del short code.
+      if (selectedAsset.issuer && donorHasTrustline === false) {
+        setError(
+          `Tu wallet todavía no acepta ${selectedAsset.code}: activalo con el botón "Activar ${selectedAsset.code}" antes de donar.`,
+        )
+        return
+      }
       setBusy('Armando depósito…')
       const asset = toPaymentAsset(selectedAsset)
       const { xdr } = await buildPaymentXdr({
@@ -711,6 +769,12 @@ function PoolDetailContent({
                       : ' Quien recibe tiene que activar el activo en su billetera.'}
                   </Alert>
                 ) : null}
+                {canActivateAsDonor ? (
+                  <Alert tone="error">
+                    Tu wallet todavía no acepta {assetCode}. Activalo acá y conseguí saldo de
+                    testnet (por ejemplo desde el faucet de Circle) antes de donar.
+                  </Alert>
+                ) : null}
                 {error ? <Alert tone="error">{error}</Alert> : null}
                 {ok ? (
                   <Alert tone="ok">
@@ -749,6 +813,11 @@ function PoolDetailContent({
                   {canOpenTrustline && hasTrustline === false ? (
                     <Button variant="black" disabled={Boolean(busy)} onClick={() => void openTrustline()}>
                       Activar {assetCode}
+                    </Button>
+                  ) : null}
+                  {canActivateAsDonor ? (
+                    <Button variant="black" disabled={Boolean(busy)} onClick={() => void openTrustline()}>
+                      Activar {assetCode} en tu wallet
                     </Button>
                   ) : null}
                   {publicKey ? (

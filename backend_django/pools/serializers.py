@@ -59,6 +59,13 @@ class PoolCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("goal_amount debe ser un numero valido.") from exc
         if amount <= 0:
             raise serializers.ValidationError("goal_amount debe ser mayor a 0.")
+        # Alineado con amount_to_scaled del vault: una meta con mas de 7
+        # decimales crearia un pool que despues nunca se podria registrar
+        # en el vault.
+        if (amount * Decimal(10_000_000)) != (amount * Decimal(10_000_000)).to_integral_value():
+            raise serializers.ValidationError(
+                "goal_amount debe tener hasta 7 decimales (unidad del asset)."
+            )
         return value
 
 

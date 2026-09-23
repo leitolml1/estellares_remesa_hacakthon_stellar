@@ -13,7 +13,10 @@ from .views import (
     ConfirmPoolSetupView,
     FamilyPoolDepositCreateView,
     FamilyPoolDetailView,
+    FamilyPoolLimitsUpdateView,
     FamilyPoolListView,
+    MemberRemoveView,
+    MemberRoleView,
     TrustlineBuildView,
     TrustlineSubmitView,
     WithdrawalBuildView,
@@ -29,6 +32,21 @@ urlpatterns = [
     ),
     path("confirm/", ConfirmPoolSetupView.as_view(), name="family-pool-confirm"),
     path("", FamilyPoolListView.as_view(), name="family-pool-list"),
+    path(
+        "<str:pool_account>/limits/",
+        FamilyPoolLimitsUpdateView.as_view(),
+        name="family-pool-limits-update",
+    ),
+    path(
+        "<str:pool_account>/members/role/",
+        MemberRoleView.as_view(),
+        name="family-pool-member-role",
+    ),
+    path(
+        "<str:pool_account>/members/remove/",
+        MemberRemoveView.as_view(),
+        name="family-pool-member-remove",
+    ),
     path(
         "<str:pool_account>/deposits/",
         FamilyPoolDepositCreateView.as_view(),

@@ -38,7 +38,10 @@ from .serializers import (
     ConfirmPoolSetupSerializer,
     FamilyPoolDepositCreateSerializer,
     FamilyPoolDepositSerializer,
+    FamilyPoolLimitsUpdateSerializer,
     FamilyPoolSerializer,
+    MemberRemoveSerializer,
+    MemberRoleSerializer,
     TrustlineBuildSerializer,
     WithdrawalBuildSerializer,
     WithdrawalSubmitSerializer,
@@ -49,15 +52,15 @@ from .stellar_client import (
     StellarSubmissionError,
     WithdrawalLimitExceededError,
     WithdrawalValidationError,
-    build_add_signer_tx,
     build_change_trust_tx,
     build_configure_signers_tx,
     build_create_account_tx,
+    build_set_signer_tx,
     build_withdrawal_tx,
     compute_minimum_starting_balance,
     confirm_pool_setup,
-    submit_add_signer,
     submit_change_trust,
+    submit_set_signer,
     submit_withdrawal,
 )
 
@@ -72,6 +75,31 @@ def is_family_member(pool: FamilyPool, public_key: str) -> bool:
     if is_family_signer(pool, public_key):
         return True
     return public_key in (pool.depositors or [])
+
+
+def family_power(pool: FamilyPool, public_key: str) -> str | None:
+    """Rol efectivo de una wallet en la caja: el creator tiene todo,
+    despues wallet_roles, y como fallback el hecho de ser firmante
+    on-chain (deposit_withdraw) o depositor (deposit). Espejo exacto del
+    memberPower del frontend - si la wallet no pertenece, None."""
+    if pool.creator == public_key:
+        return "deposit_withdraw"
+    role = (pool.wallet_roles or {}).get(public_key)
+    if role in ("deposit_withdraw", "withdraw", "deposit"):
+        return role
+    if is_family_signer(pool, public_key):
+        return "deposit_withdraw"
+    if public_key in (pool.depositors or []):
+        return "deposit"
+    return None
+
+
+def family_can_withdraw(pool: FamilyPool, public_key: str) -> bool:
+    return family_power(pool, public_key) in ("withdraw", "deposit_withdraw")
+
+
+def family_can_deposit(pool: FamilyPool, public_key: str) -> bool:
+    return family_power(pool, public_key) in ("deposit", "deposit_withdraw")
 
 
 def family_pools_visible_to(public_key: str):
@@ -350,9 +378,9 @@ class WithdrawalBuildView(APIView):
         serializer = WithdrawalBuildSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        if not is_family_member(pool, data["requester_public_key"]):
+        if not family_can_withdraw(pool, data["requester_public_key"]):
             return Response(
-                {"detail": "Solo el creador o una wallet asociada puede pedir retiros."},
+                {"detail": "Tu rol en esta caja no incluye retiros (o no sos miembro)."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -454,9 +482,9 @@ class TrustlineBuildView(APIView):
         pool = get_object_or_404(FamilyPool, pool_account=pool_account)
         serializer = TrustlineBuildSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if not is_family_member(pool, serializer.validated_data["requester_public_key"]):
+        if not family_can_withdraw(pool, serializer.validated_data["requester_public_key"]):
             return Response(
-                {"detail": "Solo el creador o una wallet asociada puede abrir trustlines."},
+                {"detail": "Tu rol en esta caja no incluye retiros (o no sos miembro)."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -522,8 +550,9 @@ class AddSignerBuildView(APIView):
             )
 
         try:
-            xdr = build_add_signer_tx(
+            xdr = build_set_signer_tx(
                 pool.pool_account,
+                pool.creator,
                 data["signer_public_key"],
                 data["weight"],
             )
@@ -566,10 +595,14 @@ class AddSignerSubmitView(APIView):
         serializer.is_valid(raise_exception=True)
 
         try:
-            result = submit_add_signer(pool.pool_account, serializer.validated_data["signed_xdr"])
+            result = submit_set_signer(
+                pool.pool_account,
+                pool.creator,
+                serializer.validated_data["signed_xdr"],
+            )
         except WithdrawalValidationError as exc:
             return Response(
-                {"detail": f"La transaccion enviada no es un alta de firmante valida: {exc.reason}"},
+                {"detail": f"La transaccion enviada no es una operacion de firmante valida: {exc.reason}"},
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
         except StellarSubmissionError as exc:
@@ -602,18 +635,29 @@ class AddSignerSubmitView(APIView):
 
         previous_signers = {signer.get("public_key") for signer in (pool.signers or [])}
         roles = dict(pool.wallet_roles or {})
-        role = str(request.data.get("role") or "deposit_withdraw").strip().replace("-", "_")
-        if role not in ("deposit_withdraw", "withdraw"):
-            role = "deposit_withdraw"
+        depositors = list(pool.depositors or [])
+
+        submit_weight = result.get("weight")
+        if submit_weight == 0:
+            # Baja de firmante: saca su rol y su lugar como depositor en la
+            # DB. La revocacion on-chain ya sucedio (el submit valido la tx
+            # estructuralmente y Horizon la acepto).
+            roles.pop(result["signer"], None)
+            depositors = [key for key in depositors if key != result["signer"]]
+        else:
+            role = str(request.data.get("role") or "deposit_withdraw").strip().replace("-", "_")
+            if role not in ("deposit_withdraw", "withdraw"):
+                role = "deposit_withdraw"
+            new_keys = {signer["public_key"] for signer in onchain["signers"]}
+            for key in new_keys - previous_signers:
+                roles[key] = role
 
         pool.signers = onchain["signers"]
         pool.med_threshold = onchain["med_threshold"]
         pool.high_threshold = onchain["high_threshold"]
-        new_keys = {signer["public_key"] for signer in onchain["signers"]}
-        for key in new_keys - previous_signers:
-            roles[key] = role
+        onchain_keys = {signer["public_key"] for signer in onchain["signers"]}
         pool.wallet_roles = roles
-        pool.depositors = [key for key in (pool.depositors or []) if key not in new_keys]
+        pool.depositors = [key for key in depositors if key not in onchain_keys]
         pool.save(
             update_fields=[
                 "signers",
@@ -664,6 +708,132 @@ class AddDepositorView(APIView):
         return Response(FamilyPoolSerializer(pool).data)
 
 
+class MemberRoleView(APIView):
+    """POST /api/family-pools/<pool_account>/members/role/
+
+    Cambia los permisos de una wallet (deposit / withdraw /
+    deposit_withdraw) al instante, sin firmas de la familia: es un cambio
+    de la DB del backend, no toca el multisig on-chain. Solo puede
+    pedirlo el creator.
+
+    Regla de consistencia: para dar permisos de retiro la wallet tiene que
+    ser firmante on-chain (si no, su firma no contaria en el ledger); para
+    dejarla en solo-deposito no hace falta quitarla del multisig, pero la
+    API le bloquea los builds de retiro igual (family_can_withdraw).
+    """
+
+    def post(self, request, pool_account: str):
+        pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        serializer = MemberRoleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if pool.creator != data["requester_public_key"]:
+            return Response(
+                {"detail": "Solo quien creó esta caja puede cambiar permisos."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        public_key = data["public_key"]
+        if public_key == pool.creator:
+            return Response(
+                {"detail": "El creator ya tiene todos los permisos de la caja."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        role = data["role"]
+        if role != "deposit" and not is_family_signer(pool, public_key):
+            return Response(
+                {
+                    "detail": (
+                        "Esa wallet todavía no es firmante on-chain: primero dale de alta "
+                        "con la firma del creator (alta de wallet) y después cambiá el rol."
+                    )
+                },
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        roles = dict(pool.wallet_roles or {})
+        roles[public_key] = role
+        # Si pasa a solo-deposito, ya no corresponde que figure como
+        # depositor dedicado (el rol lo cubre).
+        depositors = list(pool.depositors or [])
+        if role == "deposit" and public_key not in depositors and not is_family_signer(pool, public_key):
+            depositors.append(public_key)
+        pool.wallet_roles = roles
+        pool.depositors = depositors
+        pool.save(update_fields=["wallet_roles", "depositors", "updated_at"])
+        return Response(FamilyPoolSerializer(pool).data)
+
+
+class MemberRemoveView(APIView):
+    """POST /api/family-pools/<pool_account>/members/remove/
+
+    Da de baja una wallet de la caja a nivel app (wallet_roles +
+    depositors), sin firmas de la familia. Solo puede pedirlo el creator.
+    Si la wallet es firmante on-chain, esto solo la saca de la UI: la
+    revocacion real de su firma va por el flujo set-signer con weight 0
+    (el protocolo Stellar exige firmas para eso, no hay atajo).
+    """
+
+    def post(self, request, pool_account: str):
+        pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        serializer = MemberRemoveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if pool.creator != data["requester_public_key"]:
+            return Response(
+                {"detail": "Solo quien creó esta caja puede dar de baja wallets."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        public_key = data["public_key"]
+        if public_key == pool.creator:
+            return Response(
+                {"detail": "El creator no puede darse de baja a si mismo."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if not (
+            is_family_signer(pool, public_key) or public_key in (pool.depositors or [])
+        ):
+            return Response(
+                {"detail": "Esa wallet no es miembro de esta caja."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        roles = dict(pool.wallet_roles or {})
+        roles.pop(public_key, None)
+        pool.wallet_roles = roles
+        pool.depositors = [key for key in (pool.depositors or []) if key != public_key]
+        pool.save(update_fields=["wallet_roles", "depositors", "updated_at"])
+        return Response(FamilyPoolSerializer(pool).data)
+
+
+class FamilyPoolLimitsUpdateView(APIView):
+    """POST /api/family-pools/<pool_account>/limits/
+
+    Cambia los topes de retiro (XLM + tope propio por USDC/EURC) de una
+    caja ya creada. Los topes NO viven on-chain: son una regla del backend
+    que frena que una sola firma mueva todo el saldo de una vez, y se
+    revalidan en build y en submit de cada retiro. Solo puede pedirlo el
+    creator de la caja.
+    """
+
+    def post(self, request, pool_account: str):
+        pool = get_object_or_404(FamilyPool, pool_account=pool_account)
+        serializer = FamilyPoolLimitsUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if pool.creator != data["requester_public_key"]:
+            return Response(
+                {"detail": "Solo quien creó esta caja puede cambiar los topes de retiro."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        pool.withdrawal_limit = data["withdrawal_limit"]
+        pool.asset_withdrawal_limits = data.get("asset_withdrawal_limits") or {}
+        pool.save(update_fields=["withdrawal_limit", "asset_withdrawal_limits", "updated_at"])
+        return Response(FamilyPoolSerializer(pool).data)
+
+
 class BlendSupplyBuildView(APIView):
     """POST /api/family-pools/<pool_account>/blend/supply/build/
 
@@ -678,9 +848,9 @@ class BlendSupplyBuildView(APIView):
         pool = get_object_or_404(FamilyPool, pool_account=pool_account)
         serializer = BlendAmountSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if not is_family_member(pool, serializer.validated_data["requester_public_key"]):
+        if not family_can_withdraw(pool, serializer.validated_data["requester_public_key"]):
             return Response(
-                {"detail": "Solo el creador o una wallet asociada puede operar Blend."},
+                {"detail": "Tu rol en esta caja no incluye retiros (o no sos miembro)."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -714,9 +884,9 @@ class BlendWithdrawBuildView(APIView):
         pool = get_object_or_404(FamilyPool, pool_account=pool_account)
         serializer = BlendAmountSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if not is_family_member(pool, serializer.validated_data["requester_public_key"]):
+        if not family_can_withdraw(pool, serializer.validated_data["requester_public_key"]):
             return Response(
-                {"detail": "Solo el creador o una wallet asociada puede operar Blend."},
+                {"detail": "Tu rol en esta caja no incluye retiros (o no sos miembro)."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 

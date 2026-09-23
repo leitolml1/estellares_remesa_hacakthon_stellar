@@ -9,6 +9,7 @@ import {
 } from 'react'
 import {
   connectFreighter,
+  getActiveAccount,
   humanizeFreighterError,
   isFreighterAvailable,
 } from '../lib/freighter'
@@ -70,6 +71,25 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshBalances()
   }, [refreshBalances])
+
+  // Re-sync con la cuenta activa de Freighter: si el usuario cambia de
+  // cuenta DENTRO de la extension, la app sigue creyendo la publicKey
+  // vieja (localStorage) y Freighter firma con otra wallet -> firmas
+  // extranas que Horizon rechaza (tx_bad_auth_extra). Al volver el foco a
+  // la ventana se verifica la cuenta activa y se actualiza la sesion.
+  useEffect(() => {
+    function syncActiveAccount() {
+      if (!publicKey) return
+      void getActiveAccount().then((active) => {
+        if (active && active !== publicKey) {
+          setPublicKey(active)
+          localStorage.setItem(STORAGE_KEY, active)
+        }
+      })
+    }
+    window.addEventListener('focus', syncActiveAccount)
+    return () => window.removeEventListener('focus', syncActiveAccount)
+  }, [publicKey])
 
   const connect = useCallback(async () => {
     setConnecting(true)
