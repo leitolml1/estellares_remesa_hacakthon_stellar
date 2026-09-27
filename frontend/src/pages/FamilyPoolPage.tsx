@@ -1,3 +1,4 @@
+import { tx } from '../i18n'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FormPanel, PageStage } from '../components/layout/PageStage'
 import { WalletGate } from '../components/WalletGate'
@@ -94,14 +95,16 @@ import type {
   WalletPower,
 } from '../types'
 
-const WALLET_POWERS: { id: WalletPower; label: string }[] = [
-  { id: 'deposit', label: 'Aporte' },
-  { id: 'withdraw', label: 'Operador' },
-  { id: 'deposit-withdraw', label: 'Aporte/operador' },
-]
+function walletPowers(): { id: WalletPower; label: string }[] {
+  return [
+    { id: 'deposit', label: tx('Aporte', 'Deposit') },
+    { id: 'withdraw', label: tx('Operador', 'Operator') },
+    { id: 'deposit-withdraw', label: tx('Aporte/operador', 'Deposit/operator') },
+  ]
+}
 
 function walletPowerLabel(power: WalletPower) {
-  return WALLET_POWERS.find((item) => item.id === power)?.label ?? 'Depósito y retiro'
+  return walletPowers().find((item) => item.id === power)?.label ?? tx('Depósito y retiro', 'Deposit and withdraw')
 }
 
 function LimitField({
@@ -150,7 +153,7 @@ function FamilyTabsBar({
   if (pools.length === 0) return null
   return (
     <div className="family-tabs-bar">
-      <div className="family-tabs" role="tablist" aria-label="Cajas familiares">
+      <div className="family-tabs" role="tablist" aria-label={tx("Cajas familiares", "Family boxes")}>
         {pools.map((item) => {
           const selected = !creating && item.poolAccount === activeAccount
           return (
@@ -196,12 +199,12 @@ export function FamilyPoolPage() {
     <PageStage
       className="family-pool-stage"
       layout="dashboard"
-      title="Bóveda familiar"
-      subtitle="Caja comunitaria multisig: todos pueden aportar; los retiros piden más de una firma. Tu clave privada nunca sale del navegador."
+      title={tx("Bóveda familiar", "Family vault")}
+      subtitle={tx("Caja comunitaria multisig: todos pueden aportar; los retiros piden más de una firma. Tu clave privada nunca sale del navegador.", "A shared multisig box: everyone can contribute, and withdrawals need more than one signature. Your private key never leaves the browser.")}
     >
       <WalletGate
-        title="Conectá para la caja familiar"
-        description="Hace falta tu billetera para aportar y firmar retiros."
+        title={tx("Conectá para la caja familiar", "Connect for the family box")}
+        description={tx("Hace falta tu billetera para aportar y firmar retiros.", "Your wallet is required to contribute and sign withdrawals.")}
         preview={<FamilyPreview />}
       >
         <FamilyContent />
@@ -298,7 +301,7 @@ function FamilyContent() {
   }
 
   if (!publicKey) return null
-  if (loading) return <Spinner label="Cargando tus cajas familiares…" />
+  if (loading) return <Spinner label={tx("Cargando tus cajas familiares…", "Loading your family boxes…")} />
   if (listError) return <Alert tone="error">{listError}</Alert>
 
   if (creating || !pool) {
@@ -375,7 +378,7 @@ function CreateFamilyForm({
       return
     }
     if (members.some((item) => item.publicKey === memberKey.trim())) {
-      setError('Esa wallet ya está en la lista.')
+      setError(tx("Esa wallet ya está en la lista.", "That wallet is already on the list."))
       return
     }
     setError(null)
@@ -442,12 +445,12 @@ function CreateFamilyForm({
         createXdr = created.xdr
       } catch (caught) {
         if (caught instanceof BackendError && caught.status === 409) {
-          throw new Error('Esa cuenta del pool ya existe. Recargá e intentá de nuevo.')
+          throw new Error(tx("Esa cuenta del pool ya existe. Recargá e intentá de nuevo.", "That pool account already exists. Reload and try again."))
         }
         throw caught
       }
 
-      setBusy('Firmá CreateAccount en Freighter…')
+      setBusy(tx("Firmá CreateAccount en Freighter…", "Sign CreateAccount in Freighter…"))
       const signedCreate = await signTransactionWithFreighter(
         createXdr,
         TESTNET_NETWORK_PASSPHRASE,
@@ -501,11 +504,11 @@ function CreateFamilyForm({
         Se arma una cuenta nueva en este navegador. Tu clave no sale de acá.
       </p>
       <div className="mt-3.5 space-y-2.5">
-        <Field label="Nombre">
+        <Field label={tx("Nombre", "Name")}>
           <TextInput value={title} onChange={(event) => setTitle(event.target.value)} />
         </Field>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label="Tope XLM" hint="Máximo por retiro">
+          <Field label={tx("Tope XLM", "XLM cap")} hint={tx("Máximo por retiro", "Maximum per withdrawal")}>
             <TextInput
               value={limitXlm}
               onChange={(event) => setLimitXlm(event.target.value)}
@@ -513,7 +516,7 @@ function CreateFamilyForm({
               placeholder="1000"
             />
           </Field>
-          <Field label="Tope USDC" hint="Máximo por retiro">
+          <Field label={tx("Tope USDC", "USDC cap")} hint={tx("Máximo por retiro", "Maximum per withdrawal")}>
             <TextInput
               value={limitUsdc}
               onChange={(event) => setLimitUsdc(event.target.value)}
@@ -521,7 +524,7 @@ function CreateFamilyForm({
               placeholder="100"
             />
           </Field>
-          <Field label="Tope EURC" hint="Máximo por retiro">
+          <Field label={tx("Tope EURC", "EURC cap")} hint={tx("Máximo por retiro", "Maximum per withdrawal")}>
             <TextInput
               value={limitEurc}
               onChange={(event) => setLimitEurc(event.target.value)}
@@ -548,14 +551,14 @@ function CreateFamilyForm({
             ))}
           </ul>
           <div className="mt-2 space-y-2">
-            <Field label="Nueva wallet">
+            <Field label={tx("Nueva wallet", "New wallet")}>
               <TextInput
                 value={memberKey}
                 onChange={(event) => setMemberKey(event.target.value)}
                 placeholder="G..."
               />
             </Field>
-            <Field label="Puede" hint="Elegí si aporta, retira, o las dos cosas.">
+            <Field label={tx("Puede", "Can")} hint={tx("Elegí si aporta, retira, o las dos cosas.", "Choose whether they deposit, withdraw, or both.")}>
               <WalletPowerChips
                 value={memberPowerChoice}
                 onChange={setMemberPowerChoice}
@@ -740,11 +743,11 @@ function FamilyDashboard({
 
   async function deposit() {
     if (!canDeposit) {
-      setError('Tu rol en esta caja no incluye depósitos.')
+      setError(tx("Tu rol en esta caja no incluye depósitos.", "Your role in this box does not include deposits."))
       return
     }
     if (!isStellarAmount(depositAmount)) {
-      setError('Ingresá un monto válido.')
+      setError(tx("Ingresá un monto válido.", "Enter a valid amount."))
       return
     }
     if (selectedAsset.issuer && !poolHasAsset) {
@@ -755,7 +758,7 @@ function FamilyDashboard({
       setError(null)
       setOk(null)
       setOkHash(null)
-      setBusy('Armando depósito…')
+      setBusy(tx("Armando depósito…", "Building deposit…"))
       const asset = toPaymentAsset(selectedAsset)
       const { xdr } = await buildPaymentXdr({
         sourcePublicKey: publicKey,
@@ -766,7 +769,7 @@ function FamilyDashboard({
         destMin: depositAmount.trim(),
         memo: depositNote.trim().slice(0, 28) || undefined,
       })
-      setBusy('Firmá el depósito en Freighter…')
+      setBusy(tx("Firmá el depósito en Freighter…", "Sign the deposit in Freighter…"))
       const signed = await signTransactionWithFreighter(
         xdr,
         TESTNET_NETWORK_PASSPHRASE,
@@ -784,7 +787,7 @@ function FamilyDashboard({
           // El depósito ya está on-chain.
         }
       }
-      setOk('Depósito confirmado.')
+      setOk(tx("Depósito confirmado.", "Deposit confirmed."))
       setOkHash(result.hash)
       setDepositAmount('')
       setDepositNote('')
@@ -807,7 +810,7 @@ function FamilyDashboard({
       return
     }
     if (!isStellarAmount(amount)) {
-      setError('Ingresá un monto válido.')
+      setError(tx("Ingresá un monto válido.", "Enter a valid amount."))
       return
     }
     if (kind === 'withdraw' && selectedAsset.issuer && !poolHasAsset) {
@@ -832,7 +835,7 @@ function FamilyDashboard({
       setError(null)
       setOk(null)
       setOkHash(null)
-      setBusy('Armando la transacción…')
+      setBusy(tx("Armando la transacción…", "Building the transaction…"))
       let xdr: string
       if (kind === 'withdraw') {
         const built = await buildFamilyWithdrawal(pool.poolAccount, {
@@ -849,7 +852,7 @@ function FamilyDashboard({
         xdr = (await buildBlendWithdraw(pool.poolAccount, amount.trim(), publicKey)).xdr
       }
 
-      setBusy('Firmá en tu billetera…')
+      setBusy(tx("Firmá en tu billetera…", "Sign in your wallet…"))
       const signed = await signTransactionWithFreighter(
         xdr,
         TESTNET_NETWORK_PASSPHRASE,
@@ -915,7 +918,7 @@ function FamilyDashboard({
       pool.signers.some((signer) => signer.publicKey === key) ||
       (pool.depositors ?? []).includes(key)
     ) {
-      setError('Esa wallet ya está en esta caja.')
+      setError(tx("Esa wallet ya está en esta caja.", "That wallet is already in this box."))
       return
     }
     const nick = newSignerNick.trim()
@@ -928,7 +931,7 @@ function FamilyDashboard({
       setOk(null)
       setOkHash(null)
       if (newSignerPower === 'deposit') {
-        setBusy('Asociando wallet para depósito…')
+        setBusy(tx("Asociando wallet para depósito…", "Linking wallet for deposits…"))
         const updated = await addFamilyDepositor(pool.poolAccount, {
           public_key: key,
           requester_public_key: publicKey,
@@ -984,7 +987,7 @@ function FamilyDashboard({
         requester_public_key: publicKey,
         role: target.role ? toApiRole(target.role) : undefined,
       })
-      setBusy('Firmá en tu billetera…')
+      setBusy(tx("Firmá en tu billetera…", "Sign in your wallet…"))
       const signed = await signTransactionWithFreighter(
         built.xdr,
         TESTNET_NETWORK_PASSPHRASE,
@@ -1070,7 +1073,7 @@ function FamilyDashboard({
             } catch {
               // Si ya no estaba en la DB (resync incompleto), no importa.
             }
-            setOk('Wallet dada de baja: perdió el acceso y su firma on-chain.')
+            setOk(tx("Wallet dada de baja: perdió el acceso y su firma on-chain.", "Wallet removed: it lost access and its on-chain signature."))
           },
         })
         return
@@ -1160,7 +1163,7 @@ function FamilyDashboard({
     if (!chain && nicknames && localRemovals.length === 0 && localRoles.length === 0) {
       setOk('Cambios guardados.')
     } else if (waiting > 0) {
-      setOk('Firmá este cambio. Cuando termine, guardá otra vez para el resto.')
+      setOk(tx("Firmá este cambio. Cuando termine, guardá otra vez para el resto.", "Sign this change. When it finishes, save again for the rest."))
     }
   }
 
@@ -1192,7 +1195,7 @@ function FamilyDashboard({
         setNewSignerPower('deposit-withdraw')
         setAddingWallet(false)
         if (!result.resynced) {
-          setOk('Alta enviada, pero no pudimos releer la caja: refrescá en un momento.')
+          setOk(tx("Alta enviada, pero no pudimos releer la caja: refrescá en un momento.", "The update was sent, but we could not reread the box: refresh in a moment."))
           setOkHash(hash ?? null)
           savePendingFamilyTx(null)
           setPending(null)
@@ -1208,7 +1211,7 @@ function FamilyDashboard({
         setAmount('')
         setNote('')
       }
-      setOk(hash ? 'Transacción confirmada en testnet.' : 'La transacción se envió.')
+      setOk(hash ? tx("Transacción confirmada en testnet.", "Transaction confirmed on testnet.") : tx("La transacción se envió.", "The transaction was submitted."))
       setOkHash(hash ?? null)
       const followUp = followUpRef.current
       followUpRef.current = null
@@ -1224,7 +1227,7 @@ function FamilyDashboard({
         setOk(
           next.kind === 'add-signer'
             ? 'Faltan firmas. Agregar una wallet pide el umbral alto: tiene que firmar toda la familia.'
-            : 'Faltan firmas. Que otro familiar conecte Freighter y firme acá.',
+            : tx("Faltan firmas. Que otro familiar conecte Freighter y firme acá.", "More signatures are needed. Another family member should connect Freighter and sign here."),
         )
         return
       }
@@ -1236,7 +1239,7 @@ function FamilyDashboard({
     if (!pending) return
     try {
       setError(null)
-      setBusy('Firmá en tu billetera…')
+      setBusy(tx("Firmá en tu billetera…", "Sign in your wallet…"))
       const signed = await signTransactionWithFreighter(
         pending.xdr,
         TESTNET_NETWORK_PASSPHRASE,
@@ -1338,7 +1341,7 @@ function FamilyDashboard({
             Multisig activo
           </span>
           <span className="family-status-pill is-soft">
-            Quórum: {pool.medThreshold} de {withdrawers.length} firmas
+            {tx('Firmas', 'Signatures')}: {pool.medThreshold} {tx('de', 'of')} {withdrawers.length}
           </span>
           <span className="family-status-pill is-ghost">Non-custodial</span>
         </div>
@@ -1401,7 +1404,7 @@ function FamilyDashboard({
           if (asset.code === 'XLM') {
             return (
               <article key="XLM" className="fin-asset is-xlm" id="rendimiento">
-                <div className="fin-asset-switch" role="tablist" aria-label="Saldo XLM o Blend">
+                <div className="fin-asset-switch" role="tablist" aria-label={tx("Saldo XLM o Blend", "XLM balance or Blend")}>
                   <button
                     type="button"
                     role="tab"
@@ -1570,7 +1573,7 @@ function FamilyDashboard({
               </h3>
             </div>
             {canDeposit && canWithdraw ? (
-              <div className="fin-fund-switch" role="tablist" aria-label="Aportar u operar">
+              <div className="fin-fund-switch" role="tablist" aria-label={tx("Aportar u operar", "Deposit or operate")}>
                 <button
                   type="button"
                   role="tab"
@@ -1593,7 +1596,7 @@ function FamilyDashboard({
                 </button>
               </div>
             ) : null}
-            <div className="fin-fund-assets" role="group" aria-label="Elegir moneda">
+            <div className="fin-fund-assets" role="group" aria-label={tx("Elegir moneda", "Choose asset")}>
               {KNOWN_ASSETS.map((asset) => (
                 <button
                   key={asset.code}
@@ -1651,7 +1654,7 @@ function FamilyDashboard({
                       inputMode="decimal"
                     />
                   </Field>
-                  <Field label="Nota" hint="Opcional. Máx. 28.">
+                  <Field label={tx("Nota", "Note")} hint={tx("Opcional. Máx. 28.", "Optional. Max 28.")}>
                     <TextInput
                       value={depositNote}
                       onChange={(event) => setDepositNote(event.target.value)}
@@ -1679,14 +1682,14 @@ function FamilyDashboard({
                       inputMode="decimal"
                     />
                   </Field>
-                  <Field label="Destino del retiro">
+                  <Field label={tx("Destino del retiro", "Withdrawal destination")}>
                     <TextInput
                       value={destination}
                       onChange={(event) => setDestination(event.target.value)}
                       spellCheck={false}
                     />
                   </Field>
-                  <Field label="Nota" hint="Opcional. Máx. 28.">
+                  <Field label={tx("Nota", "Note")} hint={tx("Opcional. Máx. 28.", "Optional. Max 28.")}>
                     <TextInput
                       value={note}
                       onChange={(event) => setNote(event.target.value)}
@@ -1748,7 +1751,7 @@ function FamilyDashboard({
               <span className="dash-card-count">Sos el creator</span>
             ) : null}
           </div>
-          <div className="fin-fund-switch is-desk" role="tablist" aria-label="Wallets o topes">
+          <div className="fin-fund-switch is-desk" role="tablist" aria-label={tx("Wallets o topes", "Wallets or caps")}>
             <button
               type="button"
               role="tab"
@@ -1870,7 +1873,7 @@ function FamilyDashboard({
                         {canManage ? (
                           <div className="member-tools">
                             <div className="member-perms" role="group" aria-label={`Permisos de ${shownName}`}>
-                              {WALLET_POWERS.map((option) => (
+                              {walletPowers().map((option) => (
                                 <button
                                   key={option.id}
                                   type="button"
@@ -1926,7 +1929,7 @@ function FamilyDashboard({
                   className="dash-more"
                   onClick={() => setShowAllWallets((open) => !open)}
                 >
-                  {showAllWallets ? 'Ver menos' : 'Ver más'}
+                  {showAllWallets ? tx("Ver menos", "See less") : tx("Ver más", "See more")}
                 </button>
               ) : null}
               {youAreCreator ? (
@@ -1953,7 +1956,7 @@ function FamilyDashboard({
                   </button>
                   {addingWallet ? (
                     <div className="mt-3 space-y-2.5">
-                      <Field label="Wallet">
+                      <Field label={tx("Wallet", "Wallet")}>
                         <TextInput
                           value={newSignerKey}
                           onChange={(event) => setNewSignerKey(event.target.value)}
@@ -1961,14 +1964,14 @@ function FamilyDashboard({
                           spellCheck={false}
                         />
                       </Field>
-                      <Field label="Apodo">
+                      <Field label={tx("Apodo", "Nickname")}>
                         <TextInput
                           value={newSignerNick}
                           onChange={(event) => setNewSignerNick(event.target.value)}
-                          placeholder="Leito"
+                          placeholder={tx("Leito", "Nickname")}
                         />
                       </Field>
-                      <Field label="Permisos">
+                      <Field label={tx("Permisos", "Permissions")}>
                         <WalletPowerChips
                           value={newSignerPower}
                           onChange={setNewSignerPower}
@@ -2009,7 +2012,7 @@ function FamilyDashboard({
                     onChange={(value) =>
                       setLimitsDraft((current) => ({ ...current, usdc: value }))
                     }
-                    placeholder="sin tope: retiros bloqueados"
+                    placeholder={tx("sin tope: retiros bloqueados", "no cap: withdrawals blocked")}
                     disabled={!youAreCreator || limitsBusy}
                   />
                   <LimitField
@@ -2018,7 +2021,7 @@ function FamilyDashboard({
                     onChange={(value) =>
                       setLimitsDraft((current) => ({ ...current, eurc: value }))
                     }
-                    placeholder="sin tope: retiros bloqueados"
+                    placeholder={tx("sin tope: retiros bloqueados", "no cap: withdrawals blocked")}
                     disabled={!youAreCreator || limitsBusy}
                   />
                 </div>
@@ -2055,7 +2058,7 @@ function FamilyDashboard({
                 className="dash-more"
                 onClick={() => setShowAllMoves((open) => !open)}
               >
-                {showAllMoves ? 'Ver menos' : 'Ver todos'}
+                {showAllMoves ? tx("Ver menos", "See less") : 'Ver todos'}
               </button>
             ) : null}
           </div>
@@ -2093,7 +2096,7 @@ function FamilyDashboard({
                     return (
                       <tr key={item.id}>
                         <td>{formatDate(item.createdAt)}</td>
-                        <td>{incomingMove ? 'Depósito' : 'Retiro'}</td>
+                        <td>{incomingMove ? tx("Depósito", "Deposit") : tx("Retiro", "Withdrawal")}</td>
                         <td>
                           {movementLabel(party)}
                           <span className="block font-mono text-xs text-muted">
@@ -2137,7 +2140,7 @@ function BlendYieldChart({
   const step = steps[index]
 
   return (
-    <section className="fin-card fin-yield" aria-label="Rendimiento de XLM en Blend">
+    <section className="fin-card fin-yield" aria-label={tx("Rendimiento de XLM en Blend", "XLM yield in Blend")}>
       <div className="fin-yield-head">
         <div>
           <h3 className="fin-yield-title">Curva de rendimiento</h3>
@@ -2146,7 +2149,7 @@ function BlendYieldChart({
           </p>
         </div>
         {steps.length > 1 ? (
-          <div className="fin-yield-ranges" role="tablist" aria-label="Cuánto XLM ocioso entra a Blend">
+          <div className="fin-yield-ranges" role="tablist" aria-label={tx("Cuánto XLM ocioso entra a Blend", "How much idle XLM goes into Blend")}>
             {steps.map((item, itemIndex) => (
               <button
                 key={item.id}
@@ -2294,9 +2297,9 @@ function YieldPlot({
 function YieldReadout({ step, model }: { step: YieldStep; model: BlendYieldModel }) {
   const rows = [
     ['Entran a Blend', step.idleIn, false],
-    ['Interés extra', step.extra, true],
-    ['Interés total', step.totalInterest, true],
-    ['Valor de la posición', step.position, false],
+    [tx("Interés extra", "Extra interest"), step.extra, true],
+    [tx("Interés total", "Total interest"), step.totalInterest, true],
+    [tx("Valor de la posición", "Position value"), step.position, false],
   ] as const
   return (
     <div className="fin-yield-readout">
@@ -2346,13 +2349,13 @@ function blendYieldModel(blend: BlendPosition, idleXlm: string | null): BlendYie
   const rateLabel = ratio > 0
     ? `+${(ratio * 100).toLocaleString('es-AR', { maximumFractionDigits: 2 })}%`
     : null
-  let note = 'Cuando haya XLM en Blend, el gráfico usa el interés leído del contrato.'
+  let note = tx("Cuando haya XLM en Blend, el gráfico usa el interés leído del contrato.", "Once there is XLM in Blend, the chart uses the interest read from the contract.")
   if (capital > 0 && interest > 0 && possibleExtra > 0) {
-    note = 'Hoy es el interés que Blend ya sumó. 25% a 100% estima el interés extra si entra esa parte del XLM ocioso, al mismo ritmo. No es una tasa anual fija.'
+    note = tx("Hoy es el interés que Blend ya sumó. 25% a 100% estima el interés extra si entra esa parte del XLM ocioso, al mismo ritmo. No es una tasa anual fija.", "Today is the interest Blend has already added. 25% to 100% estimates the extra interest if that share of idle XLM goes in, at the same pace. It is not a fixed annual rate.")
   } else if (capital > 0 && interest > 0) {
-    note = 'Blend ya sumó interés sobre el XLM puesto. No queda XLM ocioso para armar los escenarios.'
+    note = tx("Blend ya sumó interés sobre el XLM puesto. No queda XLM ocioso para armar los escenarios.", "Blend already added interest on the supplied XLM. There is no idle XLM left to build the scenarios.")
   } else if (capital > 0) {
-    note = 'El XLM está en Blend y el contrato todavía no muestra interés acumulado. Los escenarios aparecen cuando ese interés exista.'
+    note = tx("El XLM está en Blend y el contrato todavía no muestra interés acumulado. Los escenarios aparecen cuando ese interés exista.", "The XLM is in Blend and the contract does not show accrued interest yet. Scenarios appear once that interest exists.")
   }
   return { capital, interest, idle, possibleExtra, rateLabel, note }
 }
@@ -2447,8 +2450,8 @@ function WalletPowerChips({
   tone?: 'light' | 'dark'
 }) {
   return (
-    <div className="flex flex-wrap gap-2" role="group" aria-label="Qué puede hacer esta wallet">
-      {WALLET_POWERS.map((option) => {
+    <div className="flex flex-wrap gap-2" role="group" aria-label={tx("Qué puede hacer esta wallet", "What this wallet can do")}>
+      {walletPowers().map((option) => {
         const selected = option.id === value
         const palette =
           tone === 'dark'

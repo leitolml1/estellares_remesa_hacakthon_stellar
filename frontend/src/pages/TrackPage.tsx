@@ -1,3 +1,4 @@
+import { tx } from '../i18n'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { PageStage } from '../components/layout/PageStage'
@@ -28,8 +29,8 @@ export function TrackPage() {
   return (
     <PageStage
       layout="dashboard"
-      title="SEGUIMIENTO"
-      subtitle="Dónde está tu remesa, en tiempo real. Cualquiera con el link puede verlo."
+      title={tx("SEGUIMIENTO", "TRACKING")}
+      subtitle={tx("Dónde está tu remesa, en tiempo real. Cualquiera con el link puede verlo.", "Where your remittance is, in real time. Anyone with the link can see it.")}
     >
       <TrackContent key={txHash} txHash={txHash.trim()} />
     </PageStage>
@@ -89,11 +90,11 @@ function TrackContent({ txHash }: { txHash: string }) {
       <DashBoard>
         <DashCol>
           <DashCard
-            title="Seguí una remesa"
-            hint="Pegá el hash de la transacción que te compartieron."
+            title={tx("Seguí una remesa", "Track a remittance")}
+            hint={tx("Pegá el hash de la transacción que te compartieron.", "Paste the transaction hash they shared with you.")}
           >
             <form className="space-y-3" onSubmit={submitSearch}>
-              <Field label="Hash de la transacción">
+              <Field label={tx("Hash de la transacción", "Transaction hash")}>
                 <TextInput
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
@@ -120,8 +121,8 @@ function TrackContent({ txHash }: { txHash: string }) {
         {error ? <Alert tone="error">{error}</Alert> : null}
         {track && track.status === 'success' ? (
           <DashCard
-            title="Pagos acreditados"
-            hint="Operaciones de pago incluidas en esta transacción."
+            title={tx("Pagos acreditados", "Credited payments")}
+            hint={tx("Operaciones de pago incluidas en esta transacción.", "Payment operations included in this transaction.")}
           >
             {track.payments.length === 0 ? (
               <p className="dash-empty">
@@ -133,7 +134,7 @@ function TrackContent({ txHash }: { txHash: string }) {
                   <DashFeedItem
                     key={`${payment.from}-${payment.to}-${index}`}
                     from={truncateKey(payment.from, 4)}
-                    fromLabel="De"
+                    fromLabel={tx("De", "From")}
                     date={track.createdAt ? formatDate(track.createdAt) : undefined}
                     amount={formatAmount(payment.amount, '')}
                     code={payment.assetCode}
@@ -149,8 +150,8 @@ function TrackContent({ txHash }: { txHash: string }) {
         ) : null}
         {track && track.status === 'failed' ? (
           <DashCard
-            title="Detalle"
-            hint="La transacción entró al ledger pero fue rechazada."
+            title={tx("Detalle", "Detail")}
+            hint={tx("La transacción entró al ledger pero fue rechazada.", "The transaction entered the ledger but was rejected.")}
           >
             <p className="dash-empty">
               No se movieron fondos. Quien envió tiene que armar y firmar el pago de nuevo.
@@ -160,12 +161,12 @@ function TrackContent({ txHash }: { txHash: string }) {
       </DashCol>
       <DashCol>
         <DashCard
-          title="Compartir seguimiento"
-          hint="Este link es público: cualquiera puede ver el estado del envío."
+          title={tx("Compartir seguimiento", "Share tracking")}
+          hint={tx("Este link es público: cualquiera puede ver el estado del envío.", "This link is public: anyone can see the payment status.")}
         >
           <div className="flex flex-wrap gap-2">
             <Button variant="white" onClick={() => void copyLink()}>
-              {copied ? 'Link copiado' : 'Copiar link'}
+              {copied ? tx("Link copiado", "Link copied") : tx("Copiar link", "Copy link")}
             </Button>
             <a href={explorerTxUrl(txHash)} target="_blank" rel="noreferrer">
               <Button variant="white">Ver en Stellar Expert</Button>
@@ -174,14 +175,14 @@ function TrackContent({ txHash }: { txHash: string }) {
           <div className="mt-4 flex justify-center">
             <QrPanel
               value={`${window.location.origin}/track/${txHash}`}
-              caption="Escaneá para seguir esta remesa desde el celular."
+              caption={tx("Escaneá para seguir esta remesa desde el celular.", "Scan to track this remittance from a phone.")}
               size={160}
             />
           </div>
         </DashCard>
-        <DashCard title="Seguir otra remesa" hint="Pegá otro hash de transacción.">
+        <DashCard title={tx("Seguir otra remesa", "Track another remittance")} hint={tx("Pegá otro hash de transacción.", "Paste another transaction hash.")}>
           <form className="space-y-3" onSubmit={submitSearch}>
-            <Field label="Hash de la transacción">
+            <Field label={tx("Hash de la transacción", "Transaction hash")}>
               <TextInput
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -205,11 +206,11 @@ function buildStatusHero(track: TrackedTransaction | null, polling: boolean) {
     return (
       <DashHero
         compact
-        kicker="Estado"
-        value="Buscando…"
+        kicker={tx("Estado", "Status")}
+        value={tx("Buscando…", "Looking…")}
         remain={
           polling
-            ? 'Consultando el ledger cada 5 segundos. Si la remesa se acaba de mandar, aparece en unos segundos.'
+            ? tx("Consultando el ledger cada 5 segundos. Si la remesa se acaba de mandar, aparece en unos segundos.", "Checking the ledger every 5 seconds. If the remittance was just sent, it shows up in a few seconds.")
             : undefined
         }
       />
@@ -219,17 +220,17 @@ function buildStatusHero(track: TrackedTransaction | null, polling: boolean) {
     return (
       <DashHero
         compact
-        kicker="Estado"
-        value="Rechazada"
-        remain="La red rechazó la transacción: no se movieron fondos."
+        kicker={tx("Estado", "Status")}
+        value={tx("Rechazada", "Rejected")}
+        remain={tx("La red rechazó la transacción: no se movieron fondos.", "The network rejected the transaction: no funds moved.")}
       />
     )
   }
   return (
     <DashHero
       compact
-      kicker="Estado"
-      value="Acreditada"
+      kicker={tx("Estado", "Status")}
+      value={tx("Acreditada", "Credited")}
       remain={
         track.ledger
           ? `Confirmada en el ledger ${track.ledger}${

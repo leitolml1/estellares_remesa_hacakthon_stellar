@@ -1,3 +1,4 @@
+import { tx } from '../i18n'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FormPanel, PageStage } from '../components/layout/PageStage'
@@ -43,12 +44,12 @@ import type {
 export function ProfilePage() {
   return (
     <PageStage
-      title="PERFIL"
-      subtitle="Tu reputación se calcula acá, con tu historial y tus pools."
+      title={tx("PERFIL", "PROFILE")}
+      subtitle={tx("Tu reputación se calcula acá, con tu historial y tus pools.", "Your reputation is calculated here, from your history and your pools.")}
     >
       <WalletGate
-        title="Conectá para ver tu perfil"
-        description="Tu reputación se calcula acá con tu historial."
+        title={tx("Conectá para ver tu perfil", "Connect to see your profile")}
+        description={tx("Tu reputación se calcula acá con tu historial.", "Your reputation is calculated here from your history.")}
       >
         <ProfileContent />
       </WalletGate>
@@ -111,7 +112,7 @@ function ProfileContent() {
         <h2 className="text-3xl font-black tracking-tight">Trust score</h2>
         {loading ? (
           <div className="mt-6">
-            <Spinner label="Calculando con Horizon…" />
+            <Spinner label={tx("Calculando con Horizon…", "Calculating with Horizon…")} />
           </div>
         ) : null}
         {error ? (
@@ -130,10 +131,10 @@ function ProfileContent() {
               </div>
             </div>
             <div className="space-y-5">
-              <Row label="Frecuencia (30 días)" value={breakdown.frequency} />
-              <Row label="Volumen" value={breakdown.volume} />
-              <Row label="Participación en pools" value={breakdown.pools} />
-              <Row label="Antigüedad" value={breakdown.seniority} />
+              <Row label={tx("Frecuencia (30 días)", "Frequency (30 days)")} value={breakdown.frequency} />
+              <Row label={tx("Volumen", "Volume")} value={breakdown.volume} />
+              <Row label={tx("Participación en pools", "Pool participation")} value={breakdown.pools} />
+              <Row label={tx("Antigüedad", "Age of account")} value={breakdown.seniority} />
             </div>
           </div>
         ) : null}
@@ -197,7 +198,7 @@ function RecurringPanel() {
     if (!publicKey) return
     setFormError(null)
     if (!isStellarPublicKey(receiver)) {
-      setFormError('El destinatario tiene que ser una public key G… válida.')
+      setFormError(tx("El destinatario tiene que ser una public key G… válida.", "The recipient must be a valid G… public key."))
       return
     }
     if (!isStellarAmount(amount)) {
@@ -265,7 +266,7 @@ function RecurringPanel() {
 
       {loading ? (
         <div className="mt-5">
-          <Spinner label="Buscando tus pagos programados…" />
+          <Spinner label={tx("Buscando tus pagos programados…", "Looking for your scheduled payments…")} />
         </div>
       ) : null}
       {error ? (
@@ -351,7 +352,7 @@ function RecurringPanel() {
       ) : null}
 
       <form className="mt-6 grid gap-4 sm:grid-cols-2" onSubmit={(event) => void createRule(event)}>
-        <Field label="Destinatario" hint="Public key G… de quien recibe">
+        <Field label={tx("Destinatario", "Recipient")} hint={tx("Public key G… de quien recibe", "G… public key of whoever receives")}>
           <TextInput
             value={receiver}
             onChange={(event) => setReceiver(event.target.value)}
@@ -360,7 +361,7 @@ function RecurringPanel() {
             spellCheck={false}
           />
         </Field>
-        <Field label="Monto">
+        <Field label={tx("Monto", "Amount")}>
           <TextInput
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
@@ -368,7 +369,7 @@ function RecurringPanel() {
             inputMode="decimal"
           />
         </Field>
-        <Field label="Activo">
+        <Field label={tx("Activo", "Asset")}>
           <div className="flex flex-wrap gap-2">
             {(['XLM', 'USDC', 'EURC'] as const).map((code) => (
               <button
@@ -383,7 +384,7 @@ function RecurringPanel() {
             ))}
           </div>
         </Field>
-        <Field label="Frecuencia">
+        <Field label={tx("Frecuencia", "Frequency")}>
           <div className="flex flex-wrap gap-2">
             {FREQUENCY_CHOICES.map((choice) => (
               <button
@@ -398,7 +399,7 @@ function RecurringPanel() {
             ))}
           </div>
         </Field>
-        <Field label="Nota" hint="Opcional">
+        <Field label={tx("Nota", "Note")} hint={tx("Opcional", "Optional")}>
           <TextInput
             value={note}
             onChange={(event) => setNote(event.target.value)}
@@ -431,7 +432,7 @@ function ContactsPanel() {
     setError(null)
     setOkMessage(null)
     if (!isStellarPublicKey(walletKey)) {
-      setError('La wallet no es una public key G… válida.')
+      setError(tx("La wallet no es una public key G… válida.", "The wallet is not a valid G… public key."))
       return
     }
     const contact = saveContact(walletKey, alias)
@@ -467,15 +468,15 @@ function ContactsPanel() {
         className="mt-5 grid gap-4 sm:grid-cols-2"
         onSubmit={(event) => void addContact(event)}
       >
-        <Field label="Alias">
+        <Field label={tx("Alias", "Alias")}>
           <TextInput
             value={alias}
             onChange={(event) => setAlias(event.target.value)}
-            placeholder="Mamá"
+            placeholder={tx("Mamá", "Mom")}
             maxLength={40}
           />
         </Field>
-        <Field label="Public key">
+        <Field label={tx("Public key", "Public key")}>
           <TextInput
             value={walletKey}
             onChange={(event) => setWalletKey(event.target.value)}

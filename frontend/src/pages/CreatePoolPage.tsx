@@ -1,3 +1,4 @@
+import { tx } from '../i18n'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FormPanel, PageStage } from '../components/layout/PageStage'
@@ -25,12 +26,12 @@ import type { CommunityPool } from '../types'
 export function CreatePoolPage() {
   return (
     <PageStage
-      title="NUEVO POOL"
-      subtitle="Creá una colecta con meta. Compartí el link y cualquiera puede aportar."
+      title={tx("NUEVO POOL", "NEW POOL")}
+      subtitle={tx("Creá una colecta con meta. Compartí el link y cualquiera puede aportar.", "Create a collection with a goal. Share the link and anyone can contribute.")}
     >
       <WalletGate
-        title="Conectá para crear un pool"
-        description="La wallet conectada recibe los aportes, queda como creadora y firma el alta."
+        title={tx("Conectá para crear un pool", "Connect to create a pool")}
+        description={tx("La wallet conectada recibe los aportes, queda como creadora y firma el alta.", "The connected wallet receives contributions, stays the creator, and signs the setup.")}
       >
         <CreatePoolForm />
       </WalletGate>
@@ -55,19 +56,19 @@ function CreatePoolForm() {
 
   async function registerVault(shortCode: string): Promise<void> {
     if (!publicKey) return
-    setVaultBusy('Registrando la colecta…')
+    setVaultBusy(tx("Registrando la colecta…", "Registering the collection…"))
     try {
       const built = await buildVaultRegister(shortCode, publicKey)
       // Reconciliado por el backend: el contrato ya tiene el pool (por
       // ejemplo, un alta que confirmo a pesar de un timeout reportado).
       if (built.already_registered || !built.xdr) return
-      setVaultBusy('Firmá el alta en tu billetera…')
+      setVaultBusy(tx("Firmá el alta en tu billetera…", "Sign the setup in your wallet…"))
       const signed = await signTransactionWithFreighter(
         built.xdr,
         TESTNET_NETWORK_PASSPHRASE,
         publicKey,
       )
-      setVaultBusy('Enviando a Soroban…')
+      setVaultBusy(tx("Enviando a Soroban…", "Sending to Soroban…"))
       await submitVaultTx(shortCode, signed.signedXdr)
     } finally {
       setVaultBusy(null)
@@ -79,22 +80,22 @@ function CreatePoolForm() {
     setError(null)
     if (!publicKey) return
     if (title.trim().length < 3) {
-      setError('El título tiene que tener al menos 3 caracteres.')
+      setError(tx("El título tiene que tener al menos 3 caracteres.", "The title must be at least 3 characters."))
       return
     }
     if (goal && !isStellarAmount(goal)) {
-      setError('La meta tiene que ser un monto Stellar válido, o quedar vacía.')
+      setError(tx("La meta tiene que ser un monto Stellar válido, o quedar vacía.", "The goal must be a valid Stellar amount, or stay empty."))
       return
     }
     let deadlineValue: string | undefined
     if (deadline.trim()) {
       const parsed = new Date(deadline.trim())
       if (Number.isNaN(parsed.getTime())) {
-        setError('La fecha límite no es una fecha válida.')
+        setError(tx("La fecha límite no es una fecha válida.", "The deadline is not a valid date."))
         return
       }
       if (parsed.getTime() <= Date.now()) {
-        setError('La fecha límite tiene que ser futura.')
+        setError(tx("La fecha límite tiene que ser futura.", "The deadline has to be in the future."))
         return
       }
       deadlineValue = parsed.toISOString()
@@ -156,12 +157,12 @@ function CreatePoolForm() {
       <div ref={reveal}>
         <FormPanel className="mx-auto max-w-2xl md:mx-0">
           <h2 className="text-xl font-black tracking-tight sm:text-2xl">
-            {vaultFailed ? 'Pool creado, falta completar el alta' : 'Pool creado'}
+            {vaultFailed ? tx("Pool creado, falta completar el alta", "Pool created, setup still pending") : tx("Pool creado", "Pool created")}
           </h2>
           <p className="mt-1.5 text-sm leading-5 text-purple-deep/75">
             {vaultFailed
-              ? 'Los aportes van directo a tu wallet hasta que completes el alta.'
-              : 'Ya podés compartir el link. Los aportes entran a la colecta y podés retirar cuando quieras.'}
+              ? tx("Los aportes van directo a tu wallet hasta que completes el alta.", "Contributions go straight to your wallet until you finish setup.")
+              : tx("Ya podés compartir el link. Los aportes entran a la colecta y podés retirar cuando quieras.", "You can share the link now. Contributions enter the collection and you can withdraw whenever you want.")}
           </p>
           {vaultFailed && error ? <Alert tone="error">{error}</Alert> : null}
           <div className="mt-3 flex flex-wrap gap-2">
@@ -186,27 +187,29 @@ function CreatePoolForm() {
     <div ref={reveal}>
     <FormPanel className="mx-auto max-w-2xl md:mx-0">
       <form className="space-y-6" onSubmit={(event) => void onSubmit(event)}>
-        <Field label="Título" hint="Máximo 120 caracteres">
+        <Field label={tx("Título", "Title")} hint={tx("Máximo 120 caracteres", "Maximum 120 characters")}>
           <TextInput
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             maxLength={120}
-            placeholder="Olla popular del barrio"
+            placeholder={tx("Olla popular del barrio", "Neighborhood community pot")}
           />
         </Field>
         <div className="form-note">
           <p className="text-sm font-semibold uppercase tracking-[0.16em] text-purple-deep">
-            Acepta
+            {tx('Acepta', 'Accepts')}
           </p>
           <div className="mt-3">
             <AcceptedAssets />
           </div>
           <p className="mt-3 text-base leading-6 text-purple-deep/80">
-            USDC y EURC necesitan activar el activo en tu billetera
-            (Circle en testnet). XLM no.
+            {tx(
+              'USDC y EURC necesitan activar el activo en tu billetera (Circle en testnet). XLM no.',
+              'USDC and EURC need the asset enabled in your wallet (Circle on testnet). XLM does not.',
+            )}
           </p>
         </div>
-        <Field label="Meta en XLM" hint="Opcional. Las donaciones de cualquier asset siguen siendo libres.">
+        <Field label={tx("Meta en XLM", "Goal in XLM")} hint={tx("Opcional. Las donaciones de cualquier asset siguen siendo libres.", "Optional. Donations in any asset are still unrestricted.")}>
           <TextInput
             value={goal}
             onChange={(event) => setGoal(event.target.value)}
@@ -216,8 +219,8 @@ function CreatePoolForm() {
           <GoalFx xlm={goal} />
         </Field>
         <Field
-          label="Fecha límite"
-          hint="Opcional. Informativa: se muestra como countdown en el pool."
+          label={tx("Fecha límite", "Deadline")}
+          hint={tx("Opcional. Informativa: se muestra como countdown en el pool.", "Optional. Informational: it shows as a countdown on the pool.")}
         >
           <TextInput
             type="datetime-local"
@@ -238,7 +241,7 @@ function CreatePoolForm() {
           </p>
         </div>
         {error ? <Alert tone="error">{error}</Alert> : null}
-        {loading ? <Spinner label={vaultBusy ?? 'Creando pool…'} /> : null}
+        {loading ? <Spinner label={vaultBusy ?? tx("Creando pool…", "Creating pool…")} /> : null}
         <Button type="submit" disabled={loading}>
           Crear colecta →
         </Button>
@@ -299,7 +302,7 @@ function GoalFx({ xlm }: { xlm: string }) {
     <p className="goal-fx">
       ≈ {formatAmount(usdc, 'USDC')} · {formatAmount(eurc, 'EURC')}
       <span>
-        {source === 'dex' ? 'cotización del DEX' : 'tasa referencial de testnet'}
+        {source === 'dex' ? tx("cotización del DEX", "DEX quote") : tx("tasa referencial de testnet", "testnet reference rate")}
       </span>
     </p>
   )

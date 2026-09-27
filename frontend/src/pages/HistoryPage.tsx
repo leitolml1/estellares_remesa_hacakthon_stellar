@@ -19,26 +19,35 @@ import {
   formatDate,
   truncateKey,
 } from '../lib/format'
+import { tx } from '../i18n'
 import { getFamilyLabels, getSavedFamilyPools } from '../lib/storage'
 import type { PaymentRecord } from '../types'
 
 const ASSET_FILTERS: Array<'all' | KnownAssetCode> = ['all', 'XLM', 'USDC', 'EURC']
-const TYPE_FILTERS: Array<{ id: 'all' | 'in' | 'out'; label: string }> = [
-  { id: 'all', label: 'Todos' },
-  { id: 'out', label: 'Enviados' },
-  { id: 'in', label: 'Recibidos' },
-]
+function typeFilters() {
+  return [
+    { id: 'all' as const, label: tx('Todos', 'All') },
+    { id: 'out' as const, label: tx('Enviados', 'Sent') },
+    { id: 'in' as const, label: tx('Recibidos', 'Received') },
+  ]
+}
 
 export function HistoryPage() {
   return (
     <PageStage
       className="page-stage-history"
-      title="Historial de movimientos"
-      subtitle="Tus envíos y lo que llegó, con la nota que hayas guardado. Montos leídos de la red Stellar."
+      title={tx('Historial de movimientos', 'Movement history')}
+      subtitle={tx(
+        'Tus envíos y lo que llegó, con la nota que hayas guardado. Montos leídos de la red Stellar.',
+        'What you sent and what arrived, with any note you saved. Amounts are read from the Stellar network.',
+      )}
     >
       <WalletGate
-        title="Conectá para ver el historial"
-        description="Los montos salen de la red. Las notas las guardamos nosotros."
+        title={tx('Conectá para ver el historial', 'Connect to see history')}
+        description={tx(
+          'Los montos salen de la red. Las notas las guardamos nosotros.',
+          'Amounts come from the network. We store the notes.',
+        )}
       >
         <HistoryContent />
       </WalletGate>
@@ -153,16 +162,16 @@ function HistoryContent() {
           event.preventDefault()
         }}
       >
-        <Field label="Nota / categoría / dirección">
+        <Field label={tx('Nota / categoría / dirección', 'Note / category / address')}>
           <TextInput
             value={note}
             onChange={(event) => setNote(event.target.value)}
-            placeholder="alquiler, familia, G…"
+            placeholder={tx('alquiler, familia, G…', 'rent, family, G…')}
           />
         </Field>
-        <Field label="Tipo">
-          <div className="history-filters" role="group" aria-label="Tipo de movimiento">
-            {TYPE_FILTERS.map((item) => (
+        <Field label={tx('Tipo', 'Type')}>
+          <div className="history-filters" role="group" aria-label={tx('Tipo de movimiento', 'Movement type')}>
+            {typeFilters().map((item) => (
               <button
                 key={item.id}
                 type="button"
@@ -175,8 +184,8 @@ function HistoryContent() {
             ))}
           </div>
         </Field>
-        <Field label="Activo">
-          <div className="history-filters" role="group" aria-label="Filtrar por activo">
+        <Field label={tx('Activo', 'Asset')}>
+          <div className="history-filters" role="group" aria-label={tx('Filtrar por activo', 'Filter by asset')}>
             {ASSET_FILTERS.map((item) => (
               <button
                 key={item}
@@ -185,7 +194,7 @@ function HistoryContent() {
                 aria-pressed={asset === item}
                 onClick={() => setAsset(item)}
               >
-                {item === 'all' ? 'Todos' : item}
+                {item === 'all' ? tx('Todos', 'All') : item}
               </button>
             ))}
           </div>
@@ -194,7 +203,7 @@ function HistoryContent() {
           <Button type="submit" disabled={loading}>
             <span className="inline-flex items-center gap-2">
               <IconFilter className="h-4 w-4" />
-              Filtrar
+              {tx('Filtrar', 'Filter')}
             </span>
           </Button>
         </div>
@@ -202,19 +211,19 @@ function HistoryContent() {
 
       <div className="history-strip">
         <div>
-          <p>Este mes</p>
+          <p>{tx('Este mes', 'This month')}</p>
           <strong>{summary.monthCount}</strong>
-          <span>movimientos</span>
+          <span>{tx('movimientos', 'movements')}</span>
         </div>
         <div>
-          <p>Vol. recibido</p>
+          <p>{tx('Vol. recibido', 'Volume in')}</p>
           <strong className="is-in">+{formatAmount(String(summary.xlmIn), 'XLM')}</strong>
-          <span>solo XLM este mes</span>
+          <span>{tx('solo XLM este mes', 'XLM only this month')}</span>
         </div>
         <div>
-          <p>Vol. enviado</p>
+          <p>{tx('Vol. enviado', 'Volume out')}</p>
           <strong className="is-out">-{formatAmount(String(summary.xlmOut), 'XLM')}</strong>
-          <span>solo XLM este mes</span>
+          <span>{tx('solo XLM este mes', 'XLM only this month')}</span>
         </div>
       </div>
 
@@ -225,23 +234,23 @@ function HistoryContent() {
       ) : null}
       {loading && records.length === 0 ? (
         <div className="mt-8">
-          <Spinner label="Leyendo pagos en Horizon…" />
+          <Spinner label={tx('Leyendo pagos en Horizon…', 'Reading payments on Horizon…')} />
         </div>
       ) : null}
 
       <div className="history-meta">
-        <p>Mostrando {filtered.length} operaciones recientes</p>
-        <p>Montos leídos de Horizon · notas nuestras</p>
+        <p>{tx(`Mostrando ${filtered.length} operaciones recientes`, `Showing ${filtered.length} recent operations`)}</p>
+        <p>{tx('Montos leídos de Horizon · notas nuestras', 'Amounts read from Horizon · notes stored by us')}</p>
       </div>
 
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-base">
           <thead className="text-sm uppercase tracking-[0.12em] text-purple-deep/70">
             <tr>
-              <th className="pb-3">Fecha</th>
-              <th className="pb-3">De / Para</th>
-              <th className="pb-3">Monto</th>
-              <th className="pb-3">Nota</th>
+              <th className="pb-3">{tx('Fecha', 'Date')}</th>
+              <th className="pb-3">{tx('De / Para', 'From / To')}</th>
+              <th className="pb-3">{tx('Monto', 'Amount')}</th>
+              <th className="pb-3">{tx('Nota', 'Note')}</th>
               <th className="pb-3">Tx</th>
             </tr>
           </thead>
@@ -267,7 +276,7 @@ function HistoryContent() {
                       ) : (
                         <IconReceive className="h-3.5 w-3.5" />
                       )}
-                      {outgoing ? 'Enviado' : 'Recibido'}
+                      {outgoing ? tx('Enviado', 'Sent') : tx('Recibido', 'Received')}
                     </span>
                     <span className="history-party-name">{primary}</span>
                     <span className="flex items-center gap-2">
@@ -277,15 +286,18 @@ function HistoryContent() {
                         </span>
                       ) : null}
                       {savedContacts.includes(counterpart) ? (
-                        <span className="text-xs text-purple-deep/60">✓ contacto</span>
+                        <span className="text-xs text-purple-deep/60">{tx('✓ contacto', '✓ contact')}</span>
                       ) : (
                         <button
                           type="button"
                           className="text-xs text-purple underline"
                           onClick={() => addContact(counterpart)}
-                          title="Guardar esta wallet en tu libreta de contactos"
+                          title={tx(
+                            'Guardar esta wallet en tu libreta de contactos',
+                            'Save this wallet to your contacts',
+                          )}
                         >
-                          + contacto
+                          {tx('+ contacto', '+ contact')}
                         </button>
                       )}
                     </span>
@@ -325,13 +337,15 @@ function HistoryContent() {
       </div>
 
       {filtered.length === 0 && !loading ? (
-        <p className="mt-6 text-base text-purple-deep/70">No hay pagos con esos filtros.</p>
+        <p className="mt-6 text-base text-purple-deep/70">
+          {tx('No hay pagos con esos filtros.', 'No payments match those filters.')}
+        </p>
       ) : null}
 
       {cursor ? (
         <div className="mt-6">
           <Button variant="ghost" disabled={loading} onClick={() => void load(cursor)}>
-            Cargar más
+            {tx('Cargar más', 'Load more')}
           </Button>
         </div>
       ) : null}

@@ -293,7 +293,7 @@ export function DeckPage() {
                 <p className="deck-card-label">{card.label}</p>
                 <p>{card.body}</p>
                 <DeckArt name={card.art} />
-                {'marks' in card ? (
+                {'marks' in card && card.marks ? (
                   <div className="deck-marks">
                     {card.marks.map((code) => (
                       <span key={code} className="deck-mark">

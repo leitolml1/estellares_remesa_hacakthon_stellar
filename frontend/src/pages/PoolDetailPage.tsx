@@ -1,3 +1,4 @@
+import { tx } from '../i18n'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { FreighterCta } from '../components/FreighterCta'
@@ -60,7 +61,7 @@ export function PoolDetailPage() {
       layout="dashboard"
       kicker={head.kicker || undefined}
       title={head.title}
-      subtitle="Cualquiera puede aportar con el link, sin registrarse."
+      subtitle={tx("Cualquiera puede aportar con el link, sin registrarse.", "Anyone can contribute with the link, without signing up.")}
     >
       <PoolDetailContent onHead={setHead} />
     </PageStage>
@@ -471,7 +472,7 @@ function PoolDetailContent({
   async function depositFromFreighter() {
     if (!publicKey || !pool || !selectedAsset) return
     if (publicKey === pool.creator || publicKey === pool.walletPublicKey) {
-      setError('Creaste este pool: no podés donarte a vos mismo.')
+      setError(tx("Creaste este pool: no podés donarte a vos mismo.", "You created this pool: you cannot donate to yourself."))
       return
     }
     if (completed) {
@@ -479,7 +480,7 @@ function PoolDetailContent({
       return
     }
     if (!suggestedAmount) {
-      setError('Ingresá un monto válido para depositar desde Freighter.')
+      setError(tx("Ingresá un monto válido para depositar desde Freighter.", "Enter a valid amount to deposit from Freighter."))
       return
     }
     try {
@@ -497,13 +498,13 @@ function PoolDetailContent({
           )
           return
         }
-        setBusy('Armando el depósito…')
+        setBusy(tx("Armando el depósito…", "Building the deposit…"))
         const { xdr } = await buildVaultDeposit(shortCode, {
           donor_public_key: publicKey,
           asset_code: selectedAsset.code,
           amount: suggestedAmount,
         })
-        setBusy('Firmá el depósito en tu billetera…')
+        setBusy(tx("Firmá el depósito en tu billetera…", "Sign the deposit in your wallet…"))
         setDonationStatus('signing')
         const signed = await signTransactionWithFreighter(
           xdr,
@@ -530,7 +531,7 @@ function PoolDetailContent({
         )
         return
       }
-      setBusy('Armando depósito…')
+      setBusy(tx("Armando depósito…", "Building deposit…"))
       const asset = toPaymentAsset(selectedAsset)
       const { xdr } = await buildPaymentXdr({
         sourcePublicKey: publicKey,
@@ -541,7 +542,7 @@ function PoolDetailContent({
         destMin: suggestedAmount,
         memo: pool.shortCode,
       })
-      setBusy('Firmá el depósito en tu billetera…')
+      setBusy(tx("Firmá el depósito en tu billetera…", "Sign the deposit in your wallet…"))
       setDonationStatus('signing')
       const signed = await signTransactionWithFreighter(
         xdr,
@@ -573,7 +574,7 @@ function PoolDetailContent({
       return
     }
     if (!isStellarAmount(withdrawAmount)) {
-      setVaultError('Ingresá un monto válido para retirar.')
+      setVaultError(tx("Ingresá un monto válido para retirar.", "Enter a valid amount to withdraw."))
       return
     }
     const available = vault?.assets.find((item) => item.assetCode === assetCode)?.available
@@ -592,7 +593,7 @@ function PoolDetailContent({
         destination_public_key: destination,
         amount: withdrawAmount.trim(),
       })
-      setVaultBusy('Firmá el retiro en Freighter…')
+      setVaultBusy(tx("Firmá el retiro en Freighter…", "Sign the withdrawal in Freighter…"))
       const signed = await signTransactionWithFreighter(
         xdr,
         TESTNET_NETWORK_PASSPHRASE,
@@ -619,7 +620,7 @@ function PoolDetailContent({
           <p className="dash-hero-kicker">Cargando</p>
           <p className="dash-hero-value">—</p>
         </div>
-        <DashCard title="Pool" hint="Estamos trayendo el progreso y los aportes.">
+        <DashCard title="Pool" hint={tx("Estamos trayendo el progreso y los aportes.", "Loading progress and contributions.")}>
           <p className="dash-empty">Un segundo…</p>
         </DashCard>
       </div>
@@ -643,7 +644,7 @@ function PoolDetailContent({
         {copied === 'link' ? 'Link copiado' : 'Copiar link'}
       </Button>
       <Button variant="white" onClick={() => void copyShare('code')}>
-        {copied === 'code' ? 'Código copiado' : 'Copiar código'}
+        {copied === 'code' ? tx("Código copiado", "Code copied") : tx("Copiar código", "Copy code")}
       </Button>
     </div>
   )
@@ -672,7 +673,7 @@ function PoolDetailContent({
             valueTitle={fullAmountTitle(xlmRaised, 'XLM')}
             percent={goal > 0 ? `${Math.round(progress)}%` : undefined}
             progress={goal > 0 ? progress : undefined}
-            extraLabel={availableAssets.length > 0 ? 'También en el pool' : undefined}
+            extraLabel={availableAssets.length > 0 ? tx("También en el pool", "Also in the pool") : undefined}
             extra={
               availableAssets.length > 0
                 ? availableAssets.map((item) => (
@@ -685,11 +686,11 @@ function PoolDetailContent({
             }
           />
           <DashCard
-            title="Top donantes"
+            title={tx("Top donantes", "Top donors")}
             hint={
               poolRegistered
-                ? 'Aportes acumulados en XLM equivalente, leídos on-chain del vault.'
-                : 'Agregado sobre los últimos aportes entrantes, en XLM equivalente.'
+                ? tx("Aportes acumulados en XLM equivalente, leídos on-chain del vault.", "Contributions totaled in XLM equivalent, read on-chain from the vault.")
+                : tx("Agregado sobre los últimos aportes entrantes, en XLM equivalente.", "Added up from the latest incoming contributions, in XLM equivalent.")
             }
           >
             {topDonors.length === 0 ? (
@@ -723,10 +724,10 @@ function PoolDetailContent({
               completed
                 ? 'Meta alcanzada: ya no se puede donar.'
                 : activeTab === 'withdraw'
-                  ? 'Retirá al momento, firmando con la wallet del pool.'
+                  ? tx("Retirá al momento, firmando con la wallet del pool.", "Withdraw right away, signing with the pool wallet.")
                   : activeTab === 'share'
                     ? 'Cualquiera aporta con el link, sin registrarse.'
-                    : 'Elegí el activo y el monto. Tu billetera firma el depósito.'
+                    : tx("Elegí el activo y el monto. Tu billetera firma el depósito.", "Choose the asset and the amount. Your wallet signs the deposit.")
             }
           >
             {completed ? (
@@ -753,7 +754,7 @@ function PoolDetailContent({
             ) : null}
             {activeTab === 'donate' ? (
               <div className="mt-3 space-y-3">
-                <Field label="Monto">
+                <Field label={tx("Monto", "Amount")}>
                   <TextInput
                     value={amount}
                     onChange={(event) => setAmount(event.target.value)}
@@ -847,7 +848,7 @@ function PoolDetailContent({
                     inputMode="decimal"
                   />
                 </Field>
-                <Field label="Destino" hint="Vacío = tu wallet conectada.">
+                <Field label={tx("Destino", "Destination")} hint={tx("Vacío = tu wallet conectada.", "Empty = your connected wallet.")}>
                   <TextInput
                     value={withdrawDestination}
                     onChange={(event) => setWithdrawDestination(event.target.value)}
@@ -884,8 +885,8 @@ function PoolDetailContent({
               <div className="dash-share-row">
                 <p>
                   {completed
-                    ? 'La meta se cumplió. Compartí el resultado con quien aportó.'
-                    : 'Copiá el link o el código corto.'}
+                    ? tx("La meta se cumplió. Compartí el resultado con quien aportó.", "The goal was met. Share the result with everyone who contributed.")
+                    : tx("Copiá el link o el código corto.", "Copy the link or the short code.")}
                 </p>
                 {shareBar}
                 {completed && publicKey ? (
