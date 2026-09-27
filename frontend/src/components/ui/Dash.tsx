@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { tx } from '../../i18n'
 
 export function DashBoard({ children }: { children: ReactNode }) {
   return <div className="dash-board unfold-down">{children}</div>
@@ -61,7 +62,7 @@ export function DashHero({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(width)}
-          aria-label="Progreso de la meta"
+          aria-label={tx('Progreso de la meta', 'Goal progress')}
         >
           <span className="dash-hero-bar-fill" style={{ width: `${width}%` }} />
         </div>

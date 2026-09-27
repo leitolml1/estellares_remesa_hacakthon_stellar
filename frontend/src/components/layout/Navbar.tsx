@@ -1,23 +1,29 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useWallet } from '../../context/WalletContext'
+import { tx, useI18n } from '../../i18n'
 import { truncateKey } from '../../lib/format'
 import { FreighterCta } from '../FreighterCta'
 import { StarMark } from './StarMark'
 
-const links = [
-  { to: '/enviar', label: 'Enviar' },
-  { to: '/recibir', label: 'Recibir' },
-  { to: '/historial', label: 'Historial' },
-  { to: '/pools', label: 'Pools' },
-  { to: '/familia', label: 'Familia' },
-  { to: '/como-funciona', label: 'Guía' },
-]
+function navLinks() {
+  return [
+    { to: '/enviar', label: tx('Enviar', 'Send') },
+    { to: '/recibir', label: tx('Recibir', 'Receive') },
+    { to: '/historial', label: tx('Historial', 'History') },
+    { to: '/pools', label: 'Pools' },
+    { to: '/familia', label: tx('Familia', 'Family') },
+    { to: '/como-funciona', label: tx('Guía', 'Guide') },
+    { to: '/deck', label: 'Deck' },
+  ]
+}
 
 type OpenMenu = 'more' | 'wallet' | 'search' | null
 
 export function Navbar() {
   const { publicKey, disconnect } = useWallet()
+  const { locale, setLocale } = useI18n()
+  const links = navLinks()
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
   const [copied, setCopied] = useState(false)
   const [poolQuery, setPoolQuery] = useState('')
@@ -83,12 +89,12 @@ export function Navbar() {
                 Estelares
               </span>
               <span className="mt-0.5 block text-sm font-semibold tracking-tight text-ink">
-                Remesas
+                {tx('Remesas', 'Remittances')}
               </span>
             </span>
           </NavLink>
 
-          <nav className="nav-links" aria-label="Principal">
+          <nav className="nav-links" aria-label={tx('Principal', 'Main')}>
             {links.map((link) => (
               <NavLink
                 key={link.to}
@@ -103,6 +109,24 @@ export function Navbar() {
           </nav>
 
           <div className="ml-auto flex items-center gap-1.5">
+            <div className="nav-lang" role="group" aria-label={tx('Idioma', 'Language')}>
+              <button
+                type="button"
+                className={locale === 'es' ? 'is-on' : ''}
+                aria-pressed={locale === 'es'}
+                onClick={() => setLocale('es')}
+              >
+                ES
+              </button>
+              <button
+                type="button"
+                className={locale === 'en' ? 'is-on' : ''}
+                aria-pressed={locale === 'en'}
+                onClick={() => setLocale('en')}
+              >
+                EN
+              </button>
+            </div>
             <span className="nav-testnet">
               <span className="nav-pulse" />
               Testnet
@@ -110,7 +134,7 @@ export function Navbar() {
             <div className="relative">
               <button
                 type="button"
-                aria-label="Ir a pool por short code"
+                aria-label={tx('Ir a pool por short code', 'Open a pool by short code')}
                 aria-expanded={openMenu === 'search'}
                 onClick={() => toggle('search')}
                 className="nav-icon-btn"
@@ -120,7 +144,7 @@ export function Navbar() {
               {openMenu === 'search' ? (
                 <form className="nav-popover is-search" onSubmit={goToPool}>
                   <label className="nav-search-label" htmlFor="nav-pool-code">
-                    Ir a pool
+                    {tx('Ir a pool', 'Go to pool')}
                   </label>
                   <div className="nav-search-row">
                     <input
@@ -128,10 +152,10 @@ export function Navbar() {
                       ref={searchInput}
                       value={poolQuery}
                       onChange={(event) => setPoolQuery(event.target.value)}
-                      placeholder="Short code o link"
+                      placeholder={tx('Short code o link', 'Short code or link')}
                       spellCheck={false}
                     />
-                    <button type="submit">Abrir</button>
+                    <button type="submit">{tx('Abrir', 'Open')}</button>
                   </div>
                 </form>
               ) : null}
@@ -155,7 +179,9 @@ export function Navbar() {
                       role="menuitem"
                       onClick={() => void copyAddress()}
                     >
-                      {copied ? 'Address copiada' : 'Copiar address'}
+                      {copied
+                        ? tx('Address copiada', 'Address copied')
+                        : tx('Copiar address', 'Copy address')}
                     </button>
                     <button
                       type="button"
@@ -166,7 +192,7 @@ export function Navbar() {
                         disconnect()
                       }}
                     >
-                      Salir
+                      {tx('Salir', 'Sign out')}
                     </button>
                   </div>
                 ) : null}
@@ -182,7 +208,7 @@ export function Navbar() {
                 aria-haspopup="true"
                 onClick={() => toggle('more')}
               >
-                Más
+                {tx('Más', 'More')}
               </button>
               {openMenu === 'more' ? (
                 <div className="nav-popover">
@@ -198,7 +224,7 @@ export function Navbar() {
                     </NavLink>
                   ))}
                   <NavLink to="/perfil" className="nav-popover-item">
-                    Perfil
+                    {tx('Perfil', 'Profile')}
                   </NavLink>
                 </div>
               ) : null}

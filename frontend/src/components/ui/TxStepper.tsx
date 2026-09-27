@@ -1,18 +1,23 @@
 import { animate } from 'animejs'
+import { tx } from '../../i18n'
 import { useLayoutEffect, useRef } from 'react'
 
-const STEPS = [
-  { id: 'building', label: 'Armar' },
-  { id: 'signing', label: 'Firmar' },
-  { id: 'submitting', label: 'Enviar' },
-  { id: 'ok', label: 'Listo' },
-] as const
+const STEP_IDS = ['building', 'signing', 'submitting', 'ok'] as const
 
-type StepId = (typeof STEPS)[number]['id']
+type StepId = (typeof STEP_IDS)[number]
+
+function steps() {
+  return [
+    { id: 'building' as const, label: tx('Armar', 'Build') },
+    { id: 'signing' as const, label: tx('Firmar', 'Sign') },
+    { id: 'submitting' as const, label: tx('Enviar', 'Submit') },
+    { id: 'ok' as const, label: tx('Listo', 'Done') },
+  ]
+}
 
 function stepIndex(status: string): number {
   if (status === 'idle' || status === 'error') return -1
-  return STEPS.findIndex((step) => step.id === status)
+  return STEP_IDS.findIndex((step) => step === status)
 }
 
 export function TxStepper({
@@ -57,7 +62,7 @@ export function TxStepper({
 
   return (
     <ol ref={root} className="mt-5 space-y-3">
-      {STEPS.map((step, index) => {
+      {steps().map((step, index) => {
         const done = active > index || status === 'ok'
         const isActive = active === index
         const tone = done
@@ -84,10 +89,10 @@ export function TxStepper({
             </span>
             <span className={done || isActive ? 'text-white' : 'text-white/45'}>
               {step.label}
-              {isActive && status === 'building' ? ' · armando…' : null}
+              {isActive && status === 'building' ? tx(' · armando…', ' · building…') : null}
               {isActive && status === 'signing' ? ' · Freighter…' : null}
-              {isActive && status === 'submitting' ? ' · enviando…' : null}
-              {done && index === 3 ? ' · confirmada' : null}
+              {isActive && status === 'submitting' ? tx(' · enviando…', ' · submitting…') : null}
+              {done && index === 3 ? tx(' · confirmada', ' · confirmed') : null}
             </span>
           </li>
         )

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { tx } from '../../i18n'
 import { GalaxyField } from './GalaxyField'
 import { StarMark } from './StarMark'
 import { StellarMark } from './StellarMark'
@@ -16,24 +17,27 @@ export function Footer() {
               <span className="text-sm font-semibold">Estelares</span>
             </div>
             <p className="text-sm leading-6 text-white/60">
-              Remesas, pools comunitarios y ahorro familiar sobre Stellar
-              testnet. La firma siempre queda en tu wallet.
+              {tx(
+                'Remesas, pools comunitarios y ahorro familiar sobre Stellar testnet. La firma siempre queda en tu wallet.',
+                'Remittances, community pools and family savings on Stellar testnet. The signature always stays in your wallet.',
+              )}
             </p>
           </div>
           <div>
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-yellow">
-              Producto
+              {tx('Producto', 'Product')}
             </h3>
             <div className="flex flex-col gap-2 text-sm text-white/70">
-              <Link to="/enviar">Pago directo</Link>
-              <Link to="/pools/nuevo">Pool comunitario</Link>
-              <Link to="/familia">Pool familiar</Link>
-              <Link to="/como-funciona">Cómo funciona</Link>
+              <Link to="/enviar">{tx('Pago directo', 'Direct payment')}</Link>
+              <Link to="/pools/nuevo">{tx('Pool comunitario', 'Community pool')}</Link>
+              <Link to="/familia">{tx('Pool familiar', 'Family pool')}</Link>
+              <Link to="/como-funciona">{tx('Cómo funciona', 'How it works')}</Link>
+              <Link to="/deck">Deck</Link>
             </div>
           </div>
           <div>
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-yellow">
-              Red
+              {tx('Red', 'Network')}
             </h3>
             <div className="mb-3 flex flex-col gap-1.5">
               <StellarMark variant="wordmark" size={20} tone="dark" />
@@ -44,7 +48,7 @@ export function Footer() {
             <div className="flex flex-col gap-2 text-sm text-white/70">
               <span>Horizon testnet</span>
               <span>Freighter wallet</span>
-              <span>Pago con QR</span>
+              <span>{tx('Pago con QR', 'QR payment')}</span>
             </div>
           </div>
           <div>
@@ -52,8 +56,10 @@ export function Footer() {
               Hackathon
             </h3>
             <p className="text-sm leading-6 text-white/70">
-              Estellares · checkpoint 20/09 · Módulo 1, 2 y 3 con backend
-              Django.
+              {tx(
+                'Estellares · checkpoint 20/09 · Módulo 1, 2 y 3 con backend Django.',
+                'Estellares · checkpoint 20/09 · Modules 1, 2 and 3 with a Django backend.',
+              )}
             </p>
           </div>
         </div>

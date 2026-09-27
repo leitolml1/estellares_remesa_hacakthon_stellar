@@ -4,6 +4,7 @@ import {
   requestAccess,
   signTransaction,
 } from '@stellar/freighter-api'
+import { tx } from '../i18n'
 
 type FreighterApiError = NonNullable<
   Awaited<ReturnType<typeof signTransaction>>['error']
@@ -11,7 +12,10 @@ type FreighterApiError = NonNullable<
 
 export class FreighterNotInstalledError extends Error {
   constructor(
-    message = 'Freighter no está instalado o no se detecta en este navegador.',
+    message = tx(
+      'Freighter no está instalado o no se detecta en este navegador.',
+      'Freighter is not installed or was not detected in this browser.',
+    ),
   ) {
     super(message)
     this.name = 'FreighterNotInstalledError'
@@ -19,14 +23,19 @@ export class FreighterNotInstalledError extends Error {
 }
 
 export class FreighterAccessDeniedError extends Error {
-  constructor(message = 'Rechazaste la conexión con Freighter.') {
+  constructor(message = tx('Rechazaste la conexión con Freighter.', 'You rejected the Freighter connection.')) {
     super(message)
     this.name = 'FreighterAccessDeniedError'
   }
 }
 
 export class FreighterSignatureRejectedError extends Error {
-  constructor(message = 'Cancelaste la firma en el popup de Freighter.') {
+  constructor(
+    message = tx(
+      'Cancelaste la firma en el popup de Freighter.',
+      'You cancelled the signature in the Freighter popup.',
+    ),
+  ) {
     super(message)
     this.name = 'FreighterSignatureRejectedError'
   }
@@ -38,8 +47,10 @@ export class FreighterAccountMismatchError extends Error {
   constructor(expectedAddress: string, activeAddress: string) {
     const short = (key: string) => `${key.slice(0, 6)}…${key.slice(-4)}`
     super(
-      `Freighter está con otra cuenta (${short(activeAddress)}) y no con la que la app espera ` +
-        `(${short(expectedAddress)}). Seleccioná la wallet correcta en la extensión y reconectá la sesión.`,
+      tx(
+        `Freighter está con otra cuenta (${short(activeAddress)}) y no con la que la app espera (${short(expectedAddress)}). Seleccioná la wallet correcta en la extensión y reconectá la sesión.`,
+        `Freighter is on another account (${short(activeAddress)}), not the one this app expects (${short(expectedAddress)}). Select the right wallet in the extension and reconnect.`,
+      ),
     )
     this.name = 'FreighterAccountMismatchError'
     this.activeAddress = activeAddress
@@ -50,7 +61,7 @@ export class FreighterUnexpectedError extends Error {
   readonly freighterError: FreighterApiError
 
   constructor(freighterError: FreighterApiError) {
-    super(freighterError.message || 'Error inesperado de Freighter.')
+    super(freighterError.message || tx('Error inesperado de Freighter.', 'Unexpected Freighter error.'))
     this.name = 'FreighterUnexpectedError'
     this.freighterError = freighterError
   }
@@ -85,7 +96,10 @@ export async function connectFreighter(): Promise<{ publicKey: string }> {
   if (!result.address) {
     throw new FreighterUnexpectedError({
       code: -1,
-      message: 'Freighter no devolvió una dirección de cuenta válida.',
+      message: tx(
+        'Freighter no devolvió una dirección de cuenta válida.',
+        'Freighter did not return a valid account address.',
+      ),
     })
   }
 
@@ -134,7 +148,7 @@ export async function signTransactionWithFreighter(
   if (!result.signedTxXdr) {
     throw new FreighterUnexpectedError({
       code: -1,
-      message: 'Freighter no devolvió un XDR firmado.',
+      message: tx('Freighter no devolvió un XDR firmado.', 'Freighter did not return a signed XDR.'),
     })
   }
 
@@ -143,12 +157,26 @@ export async function signTransactionWithFreighter(
 
 export function humanizeFreighterError(error: unknown): string {
   if (error instanceof FreighterNotInstalledError) {
-    return `${error.message} Instalá la extensión y recargá.`
+    return tx(
+      'Freighter no está instalado o no se detecta en este navegador. Instalá la extensión y recargá.',
+      'Freighter is not installed or was not detected in this browser. Install the extension and reload.',
+    )
   }
-  if (error instanceof FreighterAccessDeniedError) return error.message
-  if (error instanceof FreighterSignatureRejectedError) return error.message
-  if (error instanceof FreighterAccountMismatchError) return error.message
+  if (error instanceof FreighterAccessDeniedError) {
+    return tx('Rechazaste la conexión con Freighter.', 'You rejected the Freighter connection.')
+  }
+  if (error instanceof FreighterSignatureRejectedError) {
+    return tx('Cancelaste la firma en el popup de Freighter.', 'You cancelled the signature in the Freighter popup.')
+  }
+  if (error instanceof FreighterAccountMismatchError) {
+    const short = (key: string) => `${key.slice(0, 6)}…${key.slice(-4)}`
+    const active = short(error.activeAddress)
+    return tx(
+      `Freighter está con otra cuenta (${active}). Seleccioná la wallet correcta en la extensión y reconectá la sesión.`,
+      `Freighter is on another account (${active}). Select the right wallet in the extension and reconnect.`,
+    )
+  }
   if (error instanceof FreighterUnexpectedError) return error.message
   if (error instanceof Error) return error.message
-  return 'No se pudo hablar con Freighter.'
+  return tx('No se pudo hablar con Freighter.', 'Could not reach Freighter.')
 }

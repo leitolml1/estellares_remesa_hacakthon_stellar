@@ -1,4 +1,10 @@
+import { getLocale } from '../i18n'
+
 export const TESTNET_NETWORK_PASSPHRASE = 'Test SDF Network ; September 2015'
+
+function localeTag() {
+  return getLocale() === 'en' ? 'en-US' : 'es-AR'
+}
 export const STELLAR_PUBKEY_REGEX = /^G[A-Z2-7]{55}$/
 export const STELLAR_AMOUNT_REGEX = /^\d+(\.\d{1,7})?$/
 
@@ -25,7 +31,7 @@ export function formatAssetAmount(
   if (!Number.isFinite(amount)) {
     return suffix ? `${value} ${suffix}` : String(value)
   }
-  const formatted = amount.toLocaleString('es-AR', {
+  const formatted = amount.toLocaleString(localeTag(), {
     minimumFractionDigits: 0,
     maximumFractionDigits: digits,
   })
@@ -42,7 +48,7 @@ export function fullAmountTitle(value: string | number, asset = 'XLM'): string {
   if (!Number.isFinite(amount)) {
     return suffix ? `${value} ${suffix}` : String(value)
   }
-  const formatted = amount.toLocaleString('es-AR', {
+  const formatted = amount.toLocaleString(localeTag(), {
     maximumFractionDigits: 7,
   })
   return suffix ? `${formatted} ${suffix}` : formatted
@@ -51,7 +57,7 @@ export function fullAmountTitle(value: string | number, asset = 'XLM'): string {
 export function formatDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('es-AR', {
+  return date.toLocaleString(localeTag(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   })

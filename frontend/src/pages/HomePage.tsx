@@ -15,13 +15,18 @@ import {
   IconUsers,
 } from '../components/ui/Icons'
 import { useWallet } from '../context/WalletContext'
+import { tx } from '../i18n'
 import { usePageMotion } from '../hooks/usePageMotion'
 import { useRevealRow } from '../hooks/useRevealRow'
-
-const phrases = ['al mundo real', 'a tu familia', 'a tu comunidad']
+import { DeckTeaser } from './DeckPage'
 
 export function HomePage() {
   const { publicKey } = useWallet()
+  const phrases = [
+    tx('al mundo real', 'to the real world'),
+    tx('a tu familia', 'to your family'),
+    tx('a tu comunidad', 'to your community'),
+  ]
   const [wordIndex, setWordIndex] = useState(0)
   const root = usePageMotion('home')
   const features = useRevealRow()
@@ -42,16 +47,17 @@ export function HomePage() {
         <div className="relative z-10 grid items-center gap-8 lg:grid-cols-[1fr_1.05fr]">
           <div>
             <p className="anim-enter text-xs font-semibold uppercase tracking-[0.22em] text-yellow">
-              Plata que llega · Argentina Challenge
+              {tx('Plata que llega · Argentina Challenge', 'Money that arrives · Argentina Challenge')}
             </p>
             <h1 className="anim-enter mt-4 text-4xl font-black leading-[1.02] tracking-tight sm:text-6xl">
-              Remesas que llegan{' '}
+              {tx('Remesas que llegan', 'Remittances that arrive')}{' '}
               <span className="text-purple">{phrases[wordIndex]}</span>
             </h1>
             <p className="anim-enter mt-6 max-w-lg text-base leading-7 text-white/75">
-              Enviá plata que llega en segundos. Recibí con un QR. Juntá un
-              pool con tu comunidad o tu familia. Tu clave nunca sale de tu
-              billetera.
+              {tx(
+                'Enviá plata que llega en segundos. Recibí con un QR. Juntá un pool con tu comunidad o tu familia. Tu clave nunca sale de tu billetera.',
+                'Send money that arrives in seconds. Get paid with a QR. Pool funds with your community or your family. Your key never leaves your wallet.',
+              )}
             </p>
             <div className="anim-enter mt-5">
               <StellarMark
@@ -64,32 +70,37 @@ export function HomePage() {
             <div className="anim-enter mt-6 flex flex-wrap items-center gap-3">
               {publicKey ? (
                 <Link to="/enviar">
-                  <Button>Empezar ahora →</Button>
+                  <Button>{tx('Empezar ahora →', 'Start now →')}</Button>
                 </Link>
               ) : (
-                <FreighterCta tone="dark" label="Empezar ahora →" />
+                <FreighterCta tone="dark" label={tx('Empezar ahora →', 'Start now →')} />
               )}
             </div>
             <div className="anim-enter mt-7">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/40">
-                Qué podés hacer
+                {tx('Qué podés hacer', 'What you can do')}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Tag to="/enviar" label="Pago directo" icon={<IconSend className="h-3.5 w-3.5" />} />
+                <Tag to="/enviar" label={tx('Pago directo', 'Direct payment')} icon={<IconSend className="h-3.5 w-3.5" />} />
                 <Tag
                   to="/pools"
-                  label="Pool comunitario"
+                  label={tx('Pool comunitario', 'Community pool')}
                   icon={<IconUsers className="h-3.5 w-3.5" />}
                 />
                 <Tag
                   to="/familia"
-                  label="Pool familiar"
+                  label={tx('Pool familiar', 'Family pool')}
                   icon={<IconFamily className="h-3.5 w-3.5" />}
                 />
                 <Tag
                   to="/como-funciona"
-                  label="Cómo funciona"
+                  label={tx('Cómo funciona', 'How it works')}
                   icon={<IconKey className="h-3.5 w-3.5" />}
+                />
+                <Tag
+                  to="/deck"
+                  label="Deck"
+                  icon={<IconPen className="h-3.5 w-3.5" />}
                 />
               </div>
             </div>
@@ -102,92 +113,113 @@ export function HomePage() {
 
       <section className="px-1">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-          Casos de uso
+          {tx('Casos de uso', 'Use cases')}
         </p>
         <h2 className="mt-2 text-2xl font-black tracking-tight sm:text-3xl">
-          Diseñado para la economía de la gente
+          {tx('Diseñado para la economía de la gente', 'Built for everyday money')}
         </h2>
       </section>
 
       <section ref={features} className="grid gap-4 sm:grid-cols-3">
         <Feature
-          title="Para quien envía"
-          body="Mandás el monto y llega aunque cambie el tipo de cambio del camino."
+          title={tx('Para quien envía', 'For the sender')}
+          body={tx(
+            'Mandás el monto y llega aunque cambie el tipo de cambio del camino.',
+            'You send an amount and it arrives even if the rate along the way changes.',
+          )}
           to="/enviar"
-          cta="Ver cómo enviar →"
+          cta={tx('Ver cómo enviar →', 'See how to send →')}
           icon={<IconSend className="h-5 w-5" />}
-          points={['Swap referencial XLM / USDC / EURC', 'Clave siempre en Freighter']}
+          points={[
+            tx('Swap referencial XLM / USDC / EURC', 'Reference swap XLM / USDC / EURC'),
+            tx('Clave siempre en Freighter', 'Key always stays in Freighter'),
+          ]}
         />
         <Feature
-          title="Para la comunidad"
-          body="Un link o QR para que cualquiera aporte, sin registrarse."
+          title={tx('Para la comunidad', 'For the community')}
+          body={tx(
+            'Un link o QR para que cualquiera aporte, sin registrarse.',
+            'A link or QR so anyone can contribute, without signing up.',
+          )}
           to="/pools"
-          cta="Crear pool abierto →"
+          cta={tx('Crear pool abierto →', 'Create an open pool →')}
           icon={<IconUsers className="h-5 w-5" />}
-          points={['Vault on-chain, no en tu wallet', 'Leaderboard leído del contrato']}
+          points={[
+            tx('Vault on-chain, no en tu wallet', 'On-chain vault, not in your wallet'),
+            tx('Leaderboard leído del contrato', 'Leaderboard read from the contract'),
+          ]}
         />
         <Feature
-          title="Para la familia"
-          body="Caja compartida: varios pueden depositar; los retiros piden más de una firma."
+          title={tx('Para la familia', 'For the family')}
+          body={tx(
+            'Caja compartida: varios pueden depositar; los retiros piden más de una firma.',
+            'A shared box: several people can deposit; withdrawals need more than one signature.',
+          )}
           to="/familia"
-          cta="Configurar caja →"
+          cta={tx('Configurar caja →', 'Set up the box →')}
           icon={<IconFamily className="h-5 w-5" />}
-          points={['Multisig nativo de Stellar', 'Roles de depósito y retiro']}
+          points={[
+            tx('Multisig nativo de Stellar', 'Native Stellar multisig'),
+            tx('Roles de depósito y retiro', 'Deposit and withdraw roles'),
+          ]}
         />
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
           icon={<IconClock className="h-4 w-4" />}
-          label="Velocidad"
+          label={tx('Velocidad', 'Speed')}
           value="~5 s"
-          note="Llega en segundos"
+          note={tx('Llega en segundos', 'Arrives in seconds')}
         />
         <Stat
           icon={<IconKey className="h-4 w-4" />}
-          label="Tu clave"
-          value="Queda"
-          note="Sin compartir tu clave"
+          label={tx('Tu clave', 'Your key')}
+          value={tx('Queda', 'Stays')}
+          note={tx('Sin compartir tu clave', 'Without sharing your key')}
         />
         <Stat
           icon={<IconPen className="h-4 w-4" />}
-          label="Firma"
-          value="Vos"
-          note="Firma en tu billetera"
+          label={tx('Firma', 'Signature')}
+          value={tx('Vos', 'You')}
+          note={tx('Firma en tu billetera', 'You sign in your wallet')}
         />
         <Stat
           icon={<IconBolt className="h-4 w-4" />}
-          label="Costo de red"
+          label={tx('Costo de red', 'Network cost')}
           value="< $0.001"
-          note="Fracciones de centavo"
+          note={tx('Fracciones de centavo', 'Fractions of a cent')}
         />
       </section>
 
+      <DeckTeaser />
+
       <section className="home-guide">
         <div className="home-guide-copy">
-          <p className="home-guide-kicker">Guía paso a paso</p>
-          <h2>Cómo funciona</h2>
+          <p className="home-guide-kicker">{tx('Guía paso a paso', 'Step by step')}</p>
+          <h2>{tx('Cómo funciona', 'How it works')}</h2>
           <p>
-            Armás en la app, firmás en Freighter y Stellar confirma. La guía
-            muestra cada módulo con pantallas de ejemplo: enviar, recibir,
-            historial, pool comunitario y caja familiar.
+            {tx(
+              'Armás en la app, firmás en Freighter y Stellar confirma. La guía muestra cada módulo con pantallas de ejemplo: enviar, recibir, historial, pool comunitario y caja familiar.',
+              'You build it in the app, sign in Freighter and Stellar confirms. The guide shows each module with sample screens: send, receive, history, community pool and family box.',
+            )}
           </p>
           <Link to="/como-funciona">
-            <Button>Ver la guía →</Button>
+            <Button>{tx('Ver la guía →', 'See the guide →')}</Button>
           </Link>
         </div>
         <ol className="home-guide-steps">
           <li>
             <span>01</span>
-            Conectar Freighter
+            {tx('Conectar Freighter', 'Connect Freighter')}
           </li>
           <li>
             <span>02</span>
-            Enviar o recibir
+            {tx('Enviar o recibir', 'Send or receive')}
           </li>
           <li>
             <span>03</span>
-            Pool o caja familiar
+            {tx('Pool o caja familiar', 'Pool or family box')}
           </li>
         </ol>
       </section>

@@ -12,6 +12,7 @@ import type {
   VaultState,
   WalletPower,
 } from '../types'
+import { tx } from '../i18n'
 import { type ApiError } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
@@ -784,10 +785,16 @@ export function isMissingSignaturesError(error: unknown): boolean {
 
 export function humanizeApiError(error: unknown): string {
   if (error instanceof DOMException && error.name === 'TimeoutError') {
-    return 'El backend Django no responde. Levantalo en :8000 e intentá de nuevo.'
+    return tx(
+      'El backend Django no responde. Levantalo en :8000 e intentá de nuevo.',
+      'The Django backend is not responding. Start it on :8000 and try again.',
+    )
   }
   if (error instanceof TypeError) {
-    return 'No pudimos hablar con Django. ¿Está corriendo en localhost:8000?'
+    return tx(
+      'No pudimos hablar con Django. ¿Está corriendo en localhost:8000?',
+      'Could not reach Django. Is it running on localhost:8000?',
+    )
   }
   if (error instanceof BackendError) {
     if (error.status === 403) return error.message
@@ -795,10 +802,13 @@ export function humanizeApiError(error: unknown): string {
     if (error.status === 409) return error.message
     if (error.status === 422) return error.message
     if (error.status >= 500) {
-      return 'Django o Horizon no responden. Levantá Django en :8000 e intentá de nuevo.'
+      return tx(
+        'Django o Horizon no responden. Levantá Django en :8000 e intentá de nuevo.',
+        'Django or Horizon is not responding. Start Django on :8000 and try again.',
+      )
     }
     return error.message
   }
   if (error instanceof Error) return error.message
-  return 'Pasó un error inesperado.'
+  return tx('Pasó un error inesperado.', 'Something unexpected went wrong.')
 }

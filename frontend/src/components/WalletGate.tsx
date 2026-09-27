@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { useWallet } from '../context/WalletContext'
+import { tx } from '../i18n'
 import { FreighterCta } from './FreighterCta'
 import { Alert } from './ui/Alert'
 import { FormPanel } from './layout/PageStage'
@@ -26,7 +27,7 @@ export function WalletGate({
       {preview}
       <FormPanel className="mx-auto max-w-xl md:mx-0">
         <p className="text-sm font-semibold uppercase tracking-[0.16em] text-purple">
-          Billetera
+          {tx('Billetera', 'Wallet')}
         </p>
         <h2 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">{title}</h2>
         <p className="mt-3 text-base leading-7 text-purple-deep/75">{description}</p>

@@ -38,6 +38,7 @@ import {
   humanizeFreighterError,
   signTransactionWithFreighter,
 } from '../lib/freighter'
+import { tx } from '../i18n'
 import { buildPaymentXdr, submitSignedXdr } from '../lib/horizon'
 
 type Status =
@@ -53,16 +54,22 @@ const QUOTE_DEBOUNCE_MS = 400
 export function SendPage() {
   return (
     <PageStage
-      title="ENVIAR"
-      subtitle="Armá el envío, firmá en tu billetera y llega en segundos."
+      title={tx('ENVIAR', 'SEND')}
+      subtitle={tx(
+        'Armá el envío, firmá en tu billetera y llega en segundos.',
+        'Build the payment, sign in your wallet, and it arrives in seconds.',
+      )}
     >
       <WalletGate
-        title="Conectá para enviar"
-        description="Conectá tu billetera. El pago se arma acá y se confirma en la red; nosotros no firmamos por vos."
+        title={tx('Conectá para enviar', 'Connect to send')}
+        description={tx(
+          'Conectá tu billetera. El pago se arma acá y se confirma en la red; nosotros no firmamos por vos.',
+          'Connect your wallet. The payment is built here and confirmed on the network; we do not sign for you.',
+        )}
         badge={
           <StellarMark size={18} tone="light" className="mt-6">
             <span className="text-[10px] font-semibold uppercase tracking-[0.16em]">
-              Sobre Stellar testnet
+              {tx('Sobre Stellar testnet', 'On Stellar testnet')}
             </span>
           </StellarMark>
         }
@@ -152,22 +159,40 @@ function SendForm() {
     if (!publicKey) return
 
     if (!isStellarPublicKey(destination)) {
-      setStatus({ kind: 'error', message: 'La cuenta destino no es una public key G… válida.' })
+      setStatus({
+        kind: 'error',
+        message: tx(
+          'La cuenta destino no es una public key G… válida.',
+          'The destination account is not a valid G… public key.',
+        ),
+      })
       return
     }
     if (!amountValid) {
-      setStatus({ kind: 'error', message: 'El monto tiene que ser positivo, con hasta 7 decimales.' })
+      setStatus({
+        kind: 'error',
+        message: tx(
+          'El monto tiene que ser positivo, con hasta 7 decimales.',
+          'The amount must be positive, with up to 7 decimals.',
+        ),
+      })
       return
     }
     if (crossAsset && (quoteLoading || !quote || quoteError)) {
       setStatus({
         kind: 'error',
-        message: 'Falta la cotización para el cambio de activo. Esperala o elegí el mismo activo en los dos extremos.',
+        message: tx(
+          'Falta la cotización para el cambio de activo. Esperala o elegí el mismo activo en los dos extremos.',
+          'The quote for the asset change is missing. Wait for it, or pick the same asset on both sides.',
+        ),
       })
       return
     }
     if (sendAsset.code !== 'XLM' && !sendAsset.issuer) {
-      setStatus({ kind: 'error', message: 'Un asset no nativo necesita issuer.' })
+      setStatus({
+        kind: 'error',
+        message: tx('Un asset no nativo necesita issuer.', 'A non-native asset needs an issuer.'),
+      })
       return
     }
 
@@ -239,7 +264,10 @@ function SendForm() {
           className="grid gap-5 sm:grid-cols-2"
           onSubmit={(event) => void onSubmit(event)}
         >
-          <Field label="Destino" hint="Public key G… de la cuenta que recibe">
+          <Field
+            label={tx('Destino', 'Destination')}
+            hint={tx('Public key G… de la cuenta que recibe', 'G… public key of the account that receives')}
+          >
             <TextInput
               value={destination}
               onChange={(event) => setDestination(event.target.value)}
@@ -249,7 +277,7 @@ function SendForm() {
             />
             {matchedContact?.alias ? (
               <p className="mt-2 text-sm text-purple-deep/70">
-                Para <strong>{matchedContact.alias}</strong>
+                {tx('Para', 'For')} <strong>{matchedContact.alias}</strong>
               </p>
             ) : null}
             {contactSuggestions.length > 0 ? (
@@ -268,7 +296,7 @@ function SendForm() {
               </div>
             ) : null}
           </Field>
-          <Field label={`Monto (en ${sendCode})`}>
+          <Field label={tx(`Monto (en ${sendCode})`, `Amount (in ${sendCode})`)}>
             <TextInput
               value={sendAmount}
               onChange={(event) => setSendAmount(event.target.value)}
@@ -277,13 +305,13 @@ function SendForm() {
             />
           </Field>
           <div className="send-assets sm:col-span-2">
-            <Field label="Enviás">
+            <Field label={tx('Enviás', 'You send')}>
               <AssetChips value={sendCode} onChange={setSendCode} />
             </Field>
             <span className="send-assets-arrow" aria-hidden="true">
               →
             </span>
-            <Field label="Recibe">
+            <Field label={tx('Recibe', 'They receive')}>
               <AssetChips
                 value={destCode}
                 onChange={(code) => setDestCode(code)}
@@ -292,26 +320,41 @@ function SendForm() {
             <p className="send-assets-hint">
               {crossAsset
                 ? quoteLoading
-                  ? 'Buscando el mejor camino de conversión…'
+                  ? tx('Buscando el mejor camino de conversión…', 'Looking for the best conversion path…')
                   : quote
-                    ? `Tasa: 1 ${sendCode} ≈ ${quote.rate} ${destCode} (${
-                        quote.source === 'dex'
-                          ? 'camino on-chain'
-                          : quote.source === 'reference'
-                            ? 'tasa referencial'
-                            : 'directo'
-                      }) · mínimo que recibe: ${formatAmount(quote.destMin, destCode)}`
+                    ? tx(
+                        `Tasa: 1 ${sendCode} ≈ ${quote.rate} ${destCode} (${
+                          quote.source === 'dex'
+                            ? 'camino on-chain'
+                            : quote.source === 'reference'
+                              ? 'tasa referencial'
+                              : 'directo'
+                        }) · mínimo que recibe: ${formatAmount(quote.destMin, destCode)}`,
+                        `Rate: 1 ${sendCode} ≈ ${quote.rate} ${destCode} (${
+                          quote.source === 'dex'
+                            ? 'on-chain path'
+                            : quote.source === 'reference'
+                              ? 'reference rate'
+                              : 'direct'
+                        }) · minimum they receive: ${formatAmount(quote.destMin, destCode)}`,
+                      )
                     : null
-                : 'Mismo activo: el destinatario recibe lo que enviás.'}
+                : tx(
+                    'Mismo activo: el destinatario recibe lo que enviás.',
+                    'Same asset: the recipient gets exactly what you send.',
+                  )}
             </p>
           </div>
           {crossAsset && amountValid && quote ? (
             <div className="sm:col-span-2">
               <Alert tone="info">
-                Enviás {formatAmount(quote.sendAmount, quote.sendAsset)} → recibe{' '}
+                {tx('Enviás', 'You send')} {formatAmount(quote.sendAmount, quote.sendAsset)} → {tx('recibe', 'they receive')}{' '}
                 <strong>{formatAmount(quote.destAmount, quote.destAsset)}</strong>
                 {quote.destMin !== quote.destAmount
-                  ? ` (mínimo ${formatAmount(quote.destMin, quote.destAsset)})`
+                  ? tx(
+                      ` (mínimo ${formatAmount(quote.destMin, quote.destAsset)})`,
+                      ` (minimum ${formatAmount(quote.destMin, quote.destAsset)})`,
+                    )
                   : ''}
               </Alert>
             </div>
@@ -322,11 +365,11 @@ function SendForm() {
             </div>
           ) : null}
           <div className="sm:col-span-2">
-            <Field label="Nota">
+            <Field label={tx('Nota', 'Note')}>
               <TextInput
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
-                placeholder="para el alquiler de abril"
+                placeholder={tx('para el alquiler de abril', 'april rent')}
               />
             </Field>
           </div>
@@ -340,14 +383,17 @@ function SendForm() {
             <div className="sm:col-span-2">
               <Alert tone="ok">
                 <span className="tx-ok-pop block">
-                  Confirmada en el ledger {status.ledger}.{' '}
+                  {tx(
+                    `Confirmada en el ledger ${status.ledger}.`,
+                    `Confirmed in ledger ${status.ledger}.`,
+                  )}{' '}
                   <a
                     className="underline"
                     href={explorerTxUrl(status.hash)}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    Ver en Stellar Expert
+                    {tx('Ver en Stellar Expert', 'View on Stellar Expert')}
                   </a>
                 </span>
               </Alert>
@@ -361,17 +407,19 @@ function SendForm() {
           {status.kind === 'ok' ? (
             <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
               <Link to={`/track/${status.hash}`}>
-                <Button variant="white">Seguí tu remesa →</Button>
+                <Button variant="white">{tx('Seguí tu remesa →', 'Track your remittance →')}</Button>
               </Link>
               <span className="text-sm text-white/55">
-                Compartí el seguimiento con quien recibe.
+                {tx('Compartí el seguimiento con quien recibe.', 'Share the tracking link with whoever receives.')}
               </span>
             </div>
           ) : null}
 
           <div className="sm:col-span-2">
             <Button type="submit" disabled={busy || submitDisabled}>
-              {crossAsset ? 'Cotizar y enviar →' : 'Firmar y enviar →'}
+              {crossAsset
+                ? tx('Cotizar y enviar →', 'Quote and send →')
+                : tx('Firmar y enviar →', 'Sign and send →')}
             </Button>
           </div>
         </form>

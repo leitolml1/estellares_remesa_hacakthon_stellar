@@ -14,6 +14,7 @@ import { Field, TextInput } from '../components/ui/Field'
 import { Spinner } from '../components/ui/Spinner'
 import { useWallet } from '../context/WalletContext'
 import { humanizeApiError, listMyCommunityPools } from '../lib/api'
+import { tx } from '../i18n'
 import { formatDate } from '../lib/format'
 import { savePool } from '../lib/storage'
 import type { CommunityPool } from '../types'
@@ -23,7 +24,10 @@ export function PoolsHomePage() {
     <PageStage
       layout="dashboard"
       title="POOLS"
-      subtitle="Tu listado es privado. Compartí el link o el código para que cualquiera aporte, sin registrarse."
+      subtitle={tx(
+        'Tu listado es privado. Compartí el link o el código para que cualquiera aporte, sin registrarse.',
+        'Your list is private. Share the link or the code so anyone can contribute, without signing up.',
+      )}
     >
       <PoolsDashboard />
     </PageStage>
@@ -82,10 +86,10 @@ function PoolsDashboard() {
     <DashBoard>
       <DashCol>
         <DashHero
-          kicker="Saldo de actividad"
+          kicker={tx('Saldo de actividad', 'Activity balance')}
           value={`${pools.length} pools`}
-          fiat="Comunitarios de esta wallet"
-          extraLabel="También aceptan"
+          fiat={tx('Comunitarios de esta wallet', 'Community pools on this wallet')}
+          extraLabel={tx('También aceptan', 'They also accept')}
           extra={
             <span className="dash-hero-chip">
               <AcceptedAssets tone="dark" />
@@ -93,14 +97,17 @@ function PoolsDashboard() {
           }
           action={
             <Link to="/pools/nuevo">
-              <Button>Nuevo pool →</Button>
+              <Button>{tx('Nuevo pool →', 'New pool →')}</Button>
             </Link>
           }
         />
         <DashCard
           lilac
-          title="Abrir un pool"
-          hint="Pegá el short code o el link. Se abre público y se puede donar desde ahí."
+          title={tx('Abrir un pool', 'Open a pool')}
+          hint={tx(
+            'Pegá el short code o el link. Se abre público y se puede donar desde ahí.',
+            'Paste the short code or the link. It opens publicly and people can donate from there.',
+          )}
         >
           <form
             className="mt-4 flex min-w-0 flex-col gap-3 sm:flex-row"
@@ -113,18 +120,18 @@ function PoolsDashboard() {
             }}
           >
             <div className="min-w-0 flex-1">
-              <Field label="Código o link del pool">
+              <Field label={tx('Código o link del pool', 'Pool code or link')}>
                 <TextInput
                   id="abrir-pool"
                   value={code}
                   onChange={(event) => setCode(event.target.value)}
-                  placeholder="Código o link del pool"
+                  placeholder={tx('Código o link del pool', 'Pool code or link')}
                 />
               </Field>
             </div>
             <div className="flex items-end">
               <Button type="submit" variant="yellow">
-                Abrir
+                {tx('Abrir', 'Open')}
               </Button>
             </div>
           </form>
@@ -133,21 +140,29 @@ function PoolsDashboard() {
       <DashCol feed>
         <DashCard
           lilac
-          title="Tus pools"
+          title={tx('Tus pools', 'Your pools')}
           hint={
             publicKey
-              ? 'Todo lo que creaste con esta wallet.'
-              : 'Conectá Freighter para ver solo los que creaste vos.'
+              ? tx('Todo lo que creaste con esta wallet.', 'Everything you created with this wallet.')
+              : tx(
+                  'Conectá Freighter para ver solo los que creaste vos.',
+                  'Connect Freighter to see only the ones you created.',
+                )
           }
         >
-          {loading ? <Spinner label="Cargando tus pools…" /> : null}
+          {loading ? <Spinner label={tx('Cargando tus pools…', 'Loading your pools…')} /> : null}
           {error ? (
             <div className="mt-4">
               <Alert tone="error">{error}</Alert>
             </div>
           ) : null}
           {!loading && !error && publicKey && pools.length === 0 ? (
-            <p className="dash-empty">Todavía no hay pools comunitarios con esta wallet.</p>
+            <p className="dash-empty">
+              {tx(
+                'Todavía no hay pools comunitarios con esta wallet.',
+                'There are no community pools on this wallet yet.',
+              )}
+            </p>
           ) : null}
           {pools.length > 0 ? (
             <div className="dash-feed">
@@ -162,7 +177,7 @@ function PoolsDashboard() {
                   </div>
                   <div className="dash-feed-amt">
                     <Link className="dash-feed-link" to={`/pools/${pool.shortCode}`}>
-                      Ver pool
+                      {tx('Ver pool', 'View pool')}
                     </Link>
                   </div>
                 </div>

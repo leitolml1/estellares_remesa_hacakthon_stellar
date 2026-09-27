@@ -1,3 +1,4 @@
+import { tx } from '../../i18n'
 import type { KnownAssetCode } from '../../lib/assets'
 import { KNOWN_ASSETS } from '../../lib/assets'
 
@@ -39,7 +40,7 @@ export function AssetChips({
   tone?: 'light' | 'dark'
 }) {
   return (
-    <div className="flex flex-wrap gap-2" role="group" aria-label="Elegir moneda">
+    <div className="flex flex-wrap gap-2" role="group" aria-label={tx('Elegir moneda', 'Choose asset')}>
       {KNOWN_ASSETS.map((asset) => {
         const selected = asset.code === value
         const palette =

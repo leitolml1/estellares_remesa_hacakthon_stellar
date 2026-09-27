@@ -1,4 +1,5 @@
 import { useWallet } from '../context/WalletContext'
+import { tx } from '../i18n'
 import { Alert } from './ui/Alert'
 import { Button } from './ui/Button'
 
@@ -7,7 +8,7 @@ export const FREIGHTER_INSTALL_URL = 'https://www.freighter.app/'
 export function FreighterCta({
   compact = false,
   tone = 'light',
-  label = 'Conectar Freighter',
+  label,
   onConnected,
 }: {
   compact?: boolean
@@ -17,6 +18,7 @@ export function FreighterCta({
 }) {
   const { available, connecting, connect } = useWallet()
   const dark = tone === 'dark'
+  const connectLabel = label ?? tx('Conectar Freighter', 'Connect Freighter')
 
   async function handleConnect() {
     await connect()
@@ -32,7 +34,7 @@ export function FreighterCta({
           rel="noreferrer"
           className="nav-connect"
         >
-          Instalar Freighter
+          {tx('Instalar Freighter', 'Install Freighter')}
         </a>
       )
     }
@@ -40,22 +42,28 @@ export function FreighterCta({
       <div className="space-y-3">
         {dark ? (
           <p className="text-sm leading-6 text-white/70">
-            No detectamos Freighter. Es la billetera del navegador para firmar.
+            {tx(
+              'No detectamos Freighter. Es la billetera del navegador para firmar.',
+              'Freighter was not detected. It is the browser wallet used to sign.',
+            )}
           </p>
         ) : (
           <Alert tone="error">
-            No detectamos Freighter. Es la billetera del navegador para firmar.
+            {tx(
+              'No detectamos Freighter. Es la billetera del navegador para firmar.',
+              'Freighter was not detected. It is the browser wallet used to sign.',
+            )}
           </Alert>
         )}
         <div className="flex flex-wrap gap-2">
           <a href={FREIGHTER_INSTALL_URL} target="_blank" rel="noreferrer">
-            <Button>Instalar Freighter</Button>
+            <Button>{tx('Instalar Freighter', 'Install Freighter')}</Button>
           </a>
           <Button
             variant={dark ? 'white' : 'ghost'}
             onClick={() => window.location.reload()}
           >
-            Ya la instalé, recargar
+            {tx('Ya la instalé, recargar', 'I installed it, reload')}
           </Button>
         </div>
       </div>
@@ -70,7 +78,7 @@ export function FreighterCta({
         onClick={() => void handleConnect()}
         disabled={connecting}
       >
-        {connecting ? 'Conectando…' : 'Conectar Freighter'}
+        {connecting ? tx('Conectando…', 'Connecting…') : tx('Conectar Freighter', 'Connect Freighter')}
       </button>
     )
   }
@@ -78,17 +86,17 @@ export function FreighterCta({
   return (
     <div className="space-y-2">
       <Button onClick={() => void handleConnect()} disabled={connecting}>
-        {connecting ? 'Conectando…' : label}
+        {connecting ? tx('Conectando…', 'Connecting…') : connectLabel}
       </Button>
       <p className={`text-sm leading-6 ${dark ? 'text-white/60' : 'text-purple-deep/70'}`}>
-        Billetera Stellar en el navegador.{' '}
+        {tx('Billetera Stellar en el navegador.', 'Stellar wallet in the browser.')}{' '}
         <a
           className="underline"
           href={FREIGHTER_INSTALL_URL}
           target="_blank"
           rel="noreferrer"
         >
-          Instalar Freighter
+          {tx('Instalar Freighter', 'Install Freighter')}
         </a>
       </p>
     </div>

@@ -8,6 +8,7 @@ import {
   TransactionBuilder,
   TransactionFailedError,
 } from '@stellar/stellar-sdk'
+import { tx } from '../i18n'
 import { TESTNET_NETWORK_PASSPHRASE } from './format'
 import type { AccountBalance, PaymentAsset } from '../types'
 
@@ -364,40 +365,70 @@ function findHorizonExtras(
 
 function messageForResultCodes(txCode?: string, opCode?: string): string | null {
   if (txCode === 'tx_no_source_account') {
-    return 'Tu cuenta no existe o todavía no fue fondeada en testnet. Usá Friendbot y reconectá Freighter.'
+    return tx(
+      'Tu cuenta no existe o todavía no fue fondeada en testnet. Usá Friendbot y reconectá Freighter.',
+      'Your account does not exist or has not been funded on testnet yet. Use Friendbot and reconnect Freighter.',
+    )
   }
   if (txCode === 'tx_bad_seq') {
-    return 'La secuencia de la cuenta cambió. Volvé a tocar enviar.'
+    return tx(
+      'La secuencia de la cuenta cambió. Volvé a tocar enviar.',
+      'The account sequence changed. Tap send again.',
+    )
   }
   if (txCode === 'tx_bad_auth' || txCode === 'tx_bad_auth_extra') {
-    return 'Freighter firmó con otra cuenta o no está en Testnet. Elegí la misma wallet y red Test SDF.'
+    return tx(
+      'Freighter firmó con otra cuenta o no está en Testnet. Elegí la misma wallet y red Test SDF.',
+      'Freighter signed with another account or is not on Testnet. Pick the same wallet and the Test SDF network.',
+    )
   }
   if (txCode === 'tx_insufficient_balance' || opCode === 'op_underfunded') {
-    return 'No hay fondos suficientes (dejá al menos 1 XLM de reserva + la comisión).'
+    return tx(
+      'No hay fondos suficientes (dejá al menos 1 XLM de reserva + la comisión).',
+      'Not enough funds (leave at least 1 XLM for the reserve plus the fee).',
+    )
   }
   if (txCode === 'tx_insufficient_fee') {
-    return 'La comisión quedó corta. Reintentá el envío.'
+    return tx('La comisión quedó corta. Reintentá el envío.', 'The fee was too low. Try the payment again.')
   }
   if (txCode === 'tx_too_late' || txCode === 'tx_too_early') {
-    return 'La transacción venció. Armala de nuevo y firmá más rápido.'
+    return tx(
+      'La transacción venció. Armala de nuevo y firmá más rápido.',
+      'The transaction expired. Build it again and sign faster.',
+    )
   }
   if (opCode === 'op_no_destination') {
-    return 'La cuenta destino no existe en testnet. Pedile que la fondee con Friendbot, o enviá al menos 1 XLM para crearla.'
+    return tx(
+      'La cuenta destino no existe en testnet. Pedile que la fondee con Friendbot, o enviá al menos 1 XLM para crearla.',
+      'The destination account does not exist on testnet. Ask them to fund it with Friendbot, or send at least 1 XLM to create it.',
+    )
   }
   if (opCode === 'op_no_trust' || opCode === 'op_src_no_trust') {
-    return 'Falta activar ese activo en la cuenta.'
+    return tx('Falta activar ese activo en la cuenta.', 'That asset is not enabled on the account yet.')
   }
   if (opCode === 'op_low_reserve') {
-    return 'El saldo quedaría por debajo de la reserva mínima de Stellar.'
+    return tx(
+      'El saldo quedaría por debajo de la reserva mínima de Stellar.',
+      'The balance would fall below Stellar’s minimum reserve.',
+    )
   }
   if (opCode === 'op_line_full') {
-    return 'El destino no puede recibir más de ese asset (línea llena).'
+    return tx(
+      'El destino no puede recibir más de ese asset (línea llena).',
+      'The destination cannot receive more of that asset (trustline is full).',
+    )
   }
   if (opCode === 'op_too_few_offers' || opCode === 'op_under_dest_min') {
-    return 'No hay camino de conversión para ese pago. Probá enviar el mismo activo.'
+    return tx(
+      'No hay camino de conversión para ese pago. Probá enviar el mismo activo.',
+      'There is no conversion path for that payment. Try sending the same asset.',
+    )
   }
   if (opCode === 'op_malformed' || txCode === 'tx_malformed') {
-    return 'La transacción quedó mal armada. Revisá monto, destino y asset.'
+    return tx(
+      'La transacción quedó mal armada. Revisá monto, destino y asset.',
+      'The transaction was built incorrectly. Check the amount, destination and asset.',
+    )
   }
   return null
 }
