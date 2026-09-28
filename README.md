@@ -14,6 +14,7 @@ the funds.
 - **API in production (Render)**: https://estellares-remesa-hacakthon-stellar.onrender.com
 - **Frontend in production (Vercel)**: https://frontend-estellares.vercel.app/
 - **Network**: Stellar Testnet (Horizon + Soroban RPC)
+- **Deck**: https://frontend-estellares.vercel.app/deck
 
 ---
 
