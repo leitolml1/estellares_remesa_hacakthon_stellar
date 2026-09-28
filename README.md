@@ -15,6 +15,7 @@ the funds.
 - **Frontend in production (Vercel)**: https://frontend-estellares.vercel.app/
 - **Network**: Stellar Testnet (Horizon + Soroban RPC)
 - **Deck**: https://frontend-estellares.vercel.app/deck
+- **Video demo**: https://www.youtube.com/watch?v=R_iFb3QfK7c
 
 ---
 
